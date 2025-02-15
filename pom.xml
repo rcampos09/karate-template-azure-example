@@ -80,7 +80,7 @@
                 </configuration>
             </plugin>
             <!-- Plugin para generar reportes Cucumber -->
-            <plugin>
+<plugin>
                 <groupId>net.masterthought</groupId>
                 <artifactId>maven-cucumber-reporting</artifactId>
                 <version>5.7.5</version>
@@ -92,11 +92,11 @@
                             <goal>generate</goal>
                         </goals>
                         <configuration>
-                            <projectName>Karate Test Results</projectName>
+                            <projectName>Karate API Tests</projectName>
                             <outputDirectory>${project.build.directory}/cucumber-reports</outputDirectory>
-                            <inputDirectory>${project.build.directory}/surefire-reports</inputDirectory>
+                            <inputDirectory>${project.build.directory}</inputDirectory>
                             <jsonFiles>
-                                <param>**/*.json</param>
+                                <param>**/karate-reports/*.json</param>
                             </jsonFiles>
                             <mergeFeaturesById>false</mergeFeaturesById>
                             <mergeFeaturesWithRetest>false</mergeFeaturesWithRetest>

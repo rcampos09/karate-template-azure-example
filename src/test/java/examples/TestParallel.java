@@ -17,6 +17,7 @@ class TestParallel {
     void testParallel() {
         Results results = Runner.path("classpath:examples")
                 .outputCucumberJson(true)
+                .karateEnv("qa")
                 .parallel(5);
         generateReport(results.getReportDir());
         assertEquals(0, results.getFailCount(), results.getErrorMessages());
@@ -27,9 +28,10 @@ class TestParallel {
                 new File(karateOutputPath), new String[] {"json"}, true);
         List<String> jsonPaths = new ArrayList<>(jsonFiles.size());
         jsonFiles.forEach(file -> jsonPaths.add(file.getAbsolutePath()));
-        Configuration config = new Configuration(new File("target"), "karate-demo");
+        Configuration config = new Configuration(new File("target"), "Karate API Tests");
+        config.addClassifications("Environment", System.getProperty("karate.env", "qa"));
+        config.addClassifications("Date", java.time.LocalDate.now().toString());
         ReportBuilder reportBuilder = new ReportBuilder(jsonPaths, config);
         reportBuilder.generateReports();
     }
-
 }
