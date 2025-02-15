@@ -67,13 +67,26 @@ steps:
     publishLocation: 'Container'
   displayName: 'Publish Karate Reports'
 
-# Task para actualizar Test Cases en Azure Test Plans
 - task: PowerShell@2
   condition: always()
   inputs:
     targetType: 'inline'
     script: |
       Write-Host "Starting to process test results..."
+      
+      # Función para extraer el ID del test case
+      function Get-TestCaseId {
+          param (
+              [string]$content
+          )
+          if ($content -match '@TestCase=(\d+)') {
+              return $matches[1]
+          }
+          return $null
+      }
+      
+      # Buscar en archivos XML de resultados
+      Write-Host "Searching in XML test results..."
       $testResults = Get-ChildItem -Path "$(System.DefaultWorkingDirectory)" -Recurse -Filter "TEST-*.xml"
       
       foreach ($result in $testResults) {
@@ -84,20 +97,34 @@ steps:
               $testName = $testCase.name
               Write-Host "Processing test case: $testName"
               
-              # Buscar el ID en el tag TestCase
-              if ($testName -match "@TestCase=(\d+)") {
-                  $testCaseId = $matches[1]
+              # Intentar obtener el ID del test case del nombre o descripción
+              $testCaseId = Get-TestCaseId $testName
+              
+              if ($testCaseId) {
                   $outcome = "Passed"
-                  
                   if ($testCase.SelectNodes("failure|error").Count -gt 0) {
                       $outcome = "Failed"
                   }
                   
                   Write-Host "Updating Test Case #$testCaseId with result: $outcome"
                   Write-Host "##vso[test.updatetestresult testCaseId=$testCaseId;result=$outcome]"
-              } else {
-                  Write-Host "No TestCase ID found in: $testName"
               }
+          }
+      }
+      
+      # Buscar en archivos Cucumber JSON
+      Write-Host "Searching in Cucumber JSON reports..."
+      $jsonFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target" -Recurse -Filter "*.json"
+      
+      foreach ($file in $jsonFiles) {
+          Write-Host "Processing JSON file: $($file.FullName)"
+          $content = Get-Content $file -Raw
+          
+          # Buscar tags de test case en el JSON
+          $matches = [regex]::Matches($content, '@TestCase=(\d+)')
+          foreach ($match in $matches) {
+              $testCaseId = $match.Groups[1].Value
+              Write-Host "Found Test Case ID in JSON: $testCaseId"
           }
       }
   displayName: 'Update Test Cases in Azure Test Plans'
