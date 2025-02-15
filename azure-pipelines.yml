@@ -74,57 +74,57 @@ steps:
     script: |
       Write-Host "Starting to process test results..."
       
-      # Función para extraer el ID del test case
-      function Get-TestCaseId {
-          param (
-              [string]$content
-          )
-          if ($content -match '@TestCase=(\d+)') {
-              return $matches[1]
-          }
-          return $null
-      }
-      
-      # Buscar en archivos XML de resultados
-      Write-Host "Searching in XML test results..."
-      $testResults = Get-ChildItem -Path "$(System.DefaultWorkingDirectory)" -Recurse -Filter "TEST-*.xml"
-      
-      foreach ($result in $testResults) {
-          Write-Host "Processing file: $($result.FullName)"
-          $xml = [xml](Get-Content $result)
-          
-          foreach ($testCase in $xml.SelectNodes("//testcase")) {
-              $testName = $testCase.name
-              Write-Host "Processing test case: $testName"
-              
-              # Intentar obtener el ID del test case del nombre o descripción
-              $testCaseId = Get-TestCaseId $testName
-              
-              if ($testCaseId) {
-                  $outcome = "Passed"
-                  if ($testCase.SelectNodes("failure|error").Count -gt 0) {
-                      $outcome = "Failed"
-                  }
-                  
-                  Write-Host "Updating Test Case #$testCaseId with result: $outcome"
-                  Write-Host "##vso[test.updatetestresult testCaseId=$testCaseId;result=$outcome]"
-              }
-          }
-      }
-      
       # Buscar en archivos Cucumber JSON
       Write-Host "Searching in Cucumber JSON reports..."
       $jsonFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target" -Recurse -Filter "*.json"
       
       foreach ($file in $jsonFiles) {
           Write-Host "Processing JSON file: $($file.FullName)"
-          $content = Get-Content $file -Raw
-          
-          # Buscar tags de test case en el JSON
-          $matches = [regex]::Matches($content, '@TestCase=(\d+)')
-          foreach ($match in $matches) {
-              $testCaseId = $match.Groups[1].Value
-              Write-Host "Found Test Case ID in JSON: $testCaseId"
+          try {
+              $jsonContent = Get-Content $file -Raw | ConvertFrom-Json
+              
+              if ($jsonContent.elements) {
+                  Write-Host "Found test scenarios in JSON"
+                  foreach ($element in $jsonContent.elements) {
+                      if ($element.tags) {
+                          foreach ($tag in $element.tags) {
+                              Write-Host "Processing tag: $($tag.name)"
+                              if ($tag.name -match '@TestCase=(\d+)') {
+                                  $testCaseId = $matches[1]
+                                  $outcome = "Passed"
+                                  $scenarioName = $element.name
+                                  
+                                  # Verificar si hay pasos fallidos
+                                  foreach ($step in $element.steps) {
+                                      if ($step.result.status -eq "failed") {
+                                          $outcome = "Failed"
+                                          Write-Host "Found failed step in scenario: $scenarioName"
+                                          break
+                                      }
+                                  }
+                                  
+                                  Write-Host "Updating Test Case #$testCaseId with result: $outcome for scenario: $scenarioName"
+                                  Write-Host "##vso[test.updatetestresult testCaseId=$testCaseId;result=$outcome]"
+                              }
+                          }
+                      }
+                  }
+              } else {
+                  Write-Host "No test scenarios found in JSON file"
+              }
+          }
+          catch {
+              Write-Host "Error processing JSON file: $_"
+              Write-Host "File content:"
+              Get-Content $file -Raw
+          }
+      }
+      
+      if (-not $jsonFiles) {
+          Write-Host "No JSON files found in target directory"
+          Write-Host "Listing target directory content:"
+          Get-ChildItem -Path "$(Build.SourcesDirectory)/target" -Recurse | ForEach-Object {
+              Write-Host $_.FullName
           }
       }
   displayName: 'Update Test Cases in Azure Test Plans'
