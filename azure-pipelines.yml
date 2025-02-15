@@ -67,12 +67,17 @@ steps:
     publishLocation: 'Container'
   displayName: 'Publish Karate Reports'
 
+# Crear un Test Run
 - task: PowerShell@2
   condition: always()
   inputs:
     targetType: 'inline'
     script: |
       Write-Host "Starting to process test results..."
+      
+      # Crear un nuevo Test Run
+      $testRunName = "Karate Tests - $(Build.BuildNumber)"
+      Write-Host "Creating Test Run: $testRunName"
       
       # Buscar en archivos Cucumber JSON
       Write-Host "Searching in Cucumber JSON reports..."
@@ -104,7 +109,9 @@ steps:
                                   }
                                   
                                   Write-Host "Updating Test Case #$testCaseId with result: $outcome for scenario: $scenarioName"
-                                  Write-Host "##vso[test.updatetestresult testCaseId=$testCaseId;result=$outcome]"
+                                  
+                                  # Usar el formato correcto para el comando de Azure DevOps
+                                  Write-Host "##vso[results.publishresult type=VSTest;resultName=$scenarioName;testCaseId=$testCaseId;outcome=$outcome]"
                               }
                           }
                       }
