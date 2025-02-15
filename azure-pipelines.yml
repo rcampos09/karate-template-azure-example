@@ -75,8 +75,8 @@ steps:
       Write-Host "Starting to process test results..."
       
       # Configuración de la API
-      $organization = "$(System.CollectionUri)"
-      $project = "$(System.TeamProject)"
+      $organization = "https://dev.azure.com/dontester"
+      $project = "Automated%20Test%20Plan"
       $pat = "$(System.AccessToken)"
       $apiVersion = "7.1-preview.1"
       
@@ -93,54 +93,62 @@ steps:
           
           $testPoint = $null
           
-          # 1. Obtener el Test Point ID
-          $testPointsUrl = "$organization$project/_apis/test/points?testCaseId=$testCaseId&api-version=$apiVersion"
-          Write-Host "Getting Test Points: $testPointsUrl"
+          # 1. Obtener el Test Plan ID primero
+          $testPlansUrl = "$organization/$project/_apis/test/plans?api-version=$apiVersion"
+          Write-Host "Getting Test Plans: $testPlansUrl"
           
           try {
-              $testPointsResponse = Invoke-RestMethod -Uri $testPointsUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Get
-              if ($testPointsResponse.value -and $testPointsResponse.value.length -gt 0) {
-                  $testPoint = $testPointsResponse.value[0].id
+              $testPlansResponse = Invoke-RestMethod -Uri $testPlansUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Get
+              if ($testPlansResponse.value -and $testPlansResponse.value.length -gt 0) {
+                  $testPlanId = $testPlansResponse.value[0].id
+                  Write-Host "Found Test Plan ID: $testPlanId"
+                  
+                  # 2. Obtener el Test Suite
+                  $testSuitesUrl = "$organization/$project/_apis/test/plans/$testPlanId/suites?api-version=$apiVersion"
+                  Write-Host "Getting Test Suites: $testSuitesUrl"
+                  
+                  $testSuitesResponse = Invoke-RestMethod -Uri $testSuitesUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Get
+                  if ($testSuitesResponse.value -and $testSuitesResponse.value.length -gt 0) {
+                      $testSuiteId = $testSuitesResponse.value[0].id
+                      Write-Host "Found Test Suite ID: $testSuiteId"
+                      
+                      # 3. Obtener el Test Point
+                      $testPointsUrl = "$organization/$project/_apis/test/Plans/$testPlanId/Suites/$testSuiteId/Points?testCaseId=$testCaseId&api-version=$apiVersion"
+                      Write-Host "Getting Test Points: $testPointsUrl"
+                      
+                      $testPointsResponse = Invoke-RestMethod -Uri $testPointsUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Get
+                      if ($testPointsResponse.value -and $testPointsResponse.value.length -gt 0) {
+                          $testPoint = $testPointsResponse.value[0].id
+                          Write-Host "Found Test Point ID: $testPoint"
+                          
+                          # 4. Crear Test Run y actualizar resultado
+                          $createRunUrl = "$organization/$project/_apis/test/runs?api-version=$apiVersion"
+                          $createRunBody = @{
+                              name = "Karate Test Run - $scenarioName"
+                              plan = @{ id = $testPlanId }
+                              pointIds = @($testPoint)
+                          } | ConvertTo-Json
+                          
+                          Write-Host "Creating Test Run: $createRunUrl"
+                          $testRun = Invoke-RestMethod -Uri $createRunUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Post -Body $createRunBody -ContentType "application/json"
+                          
+                          $updateResultUrl = "$organization/$project/_apis/test/runs/$($testRun.id)/results?api-version=$apiVersion"
+                          $updateResultBody = @{
+                              testPoint = @{ id = $testPoint }
+                              outcome = $outcome
+                              state = "Completed"
+                          } | ConvertTo-Json
+                          
+                          Write-Host "Updating Test Result: $updateResultUrl"
+                          $updateResponse = Invoke-RestMethod -Uri $updateResultUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Patch -Body $updateResultBody -ContentType "application/json"
+                          Write-Host "Successfully updated test case $testCaseId with outcome $outcome"
+                      }
+                  }
               }
           }
           catch {
-              Write-Host "Error getting test points: $_"
-              return
-          }
-          
-          if ($testPoint) {
-              # 2. Crear el Test Run
-              $createRunUrl = "$organization$project/_apis/test/runs?api-version=$apiVersion"
-              $createRunBody = @{
-                  name = "Karate Test Run - $scenarioName"
-                  automated = $true
-                  pointIds = @($testPoint)
-              } | ConvertTo-Json
-              
-              Write-Host "Creating Test Run: $createRunUrl"
-              
-              try {
-                  $testRun = Invoke-RestMethod -Uri $createRunUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Post -Body $createRunBody -ContentType "application/json"
-                  
-                  # 3. Actualizar el resultado
-                  $updateResultUrl = "$organization$project/_apis/test/runs/$($testRun.id)/results?api-version=$apiVersion"
-                  $updateResultBody = @{
-                      testCaseTitle = $scenarioName
-                      testPoint = @{ id = $testPoint }
-                      outcome = $outcome
-                  } | ConvertTo-Json
-                  
-                  Write-Host "Updating Test Result: $updateResultUrl"
-                  
-                  $updateResponse = Invoke-RestMethod -Uri $updateResultUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Patch -Body $updateResultBody -ContentType "application/json"
-                  Write-Host "Successfully updated test case $testCaseId with outcome $outcome"
-              }
-              catch {
-                  Write-Host "Error updating test result: $_"
-              }
-          }
-          else {
-              Write-Host "No test points found for test case $testCaseId"
+              Write-Host "Error in API call: $_"
+              Write-Host "Response: $($_.ErrorDetails.Message)"
           }
       }
       
