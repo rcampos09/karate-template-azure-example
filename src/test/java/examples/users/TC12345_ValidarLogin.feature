@@ -7,8 +7,8 @@ Background:
     * header Content-Type = 'application/json'
     * configure logPrettyResponse = true
 
-@TC12345
-Scenario: Validate successful login with valid credentials
+@TestCase=9
+Scenario: Login exitoso con credenciales válidas
     Given path '/login'
     And request testData.validUser
     When method POST
@@ -17,8 +17,8 @@ Scenario: Validate successful login with valid credentials
     * assert responseTime < testData.timeoutMs
     * print 'Response time:', responseTime, 'ms'
 
-@TC12346
-Scenario: Validate login failure with invalid credentials
+@TestCase=10
+Scenario: Login fallido con credenciales inválidas
     Given path '/login'
     And request testData.invalidUser
     When method POST
@@ -26,8 +26,8 @@ Scenario: Validate login failure with invalid credentials
     And match response.error == '#string'
     * print 'Error message:', response.error
 
-@TC12347
-Scenario: Create a new user and verify response
+@TestCase=11
+Scenario: Crear nuevo usuario
     Given path '/users'
     And request testData.newUser
     When method POST

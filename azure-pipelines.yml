@@ -62,24 +62,36 @@ steps:
     publishLocation: 'Container'
   displayName: 'Publish Karate Reports'
 
-# Task opcional para actualizar Test Cases en Azure Test Plans
+# Task para actualizar Test Cases en Azure Test Plans
 - task: PowerShell@2
   condition: always()
   inputs:
     targetType: 'inline'
     script: |
+      Write-Host "Starting to process test results..."
       $testResults = Get-ChildItem -Path "$(System.DefaultWorkingDirectory)" -Recurse -Filter "TEST-*.xml"
+      
       foreach ($result in $testResults) {
+          Write-Host "Processing file: $($result.FullName)"
           $xml = [xml](Get-Content $result)
+          
           foreach ($testCase in $xml.SelectNodes("//testcase")) {
               $testName = $testCase.name
-              if ($testName -match "TC(\d+)") {
+              Write-Host "Processing test case: $testName"
+              
+              # Buscar el ID en el tag TestCase
+              if ($testName -match "@TestCase=(\d+)") {
                   $testCaseId = $matches[1]
                   $outcome = "Passed"
+                  
                   if ($testCase.SelectNodes("failure|error").Count -gt 0) {
                       $outcome = "Failed"
                   }
+                  
+                  Write-Host "Updating Test Case #$testCaseId with result: $outcome"
                   Write-Host "##vso[test.updatetestresult testCaseId=$testCaseId;result=$outcome]"
+              } else {
+                  Write-Host "No TestCase ID found in: $testName"
               }
           }
       }
