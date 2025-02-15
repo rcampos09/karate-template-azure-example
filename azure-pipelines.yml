@@ -67,71 +67,117 @@ steps:
     publishLocation: 'Container'
   displayName: 'Publish Karate Reports'
 
-# Crear un Test Run
+# Actualizar Test Cases usando la API REST
 - task: PowerShell@2
-  condition: always()
   inputs:
     targetType: 'inline'
     script: |
       Write-Host "Starting to process test results..."
       
-      # Crear un nuevo Test Run
-      $testRunName = "Karate Tests - $(Build.BuildNumber)"
-      Write-Host "Creating Test Run: $testRunName"
+      # Configuración de la API
+      $organization = "$(System.CollectionUri)"
+      $project = "$(System.TeamProject)"
+      $pat = "$(System.AccessToken)"
+      $apiVersion = "7.1-preview.1"
       
-      # Buscar en archivos Cucumber JSON
-      Write-Host "Searching in Cucumber JSON reports..."
+      # Codificar el PAT para la autenticación
+      $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+      
+      # Función para actualizar el resultado del test case
+      function Update-TestCase {
+          param (
+              [string]$testCaseId,
+              [string]$outcome,
+              [string]$scenarioName
+          )
+          
+          $testPoint = $null
+          
+          # 1. Obtener el Test Point ID
+          $testPointsUrl = "$organization$project/_apis/test/points?testCaseId=$testCaseId&api-version=$apiVersion"
+          Write-Host "Getting Test Points: $testPointsUrl"
+          
+          try {
+              $testPointsResponse = Invoke-RestMethod -Uri $testPointsUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Get
+              if ($testPointsResponse.value -and $testPointsResponse.value.length -gt 0) {
+                  $testPoint = $testPointsResponse.value[0].id
+              }
+          }
+          catch {
+              Write-Host "Error getting test points: $_"
+              return
+          }
+          
+          if ($testPoint) {
+              # 2. Crear el Test Run
+              $createRunUrl = "$organization$project/_apis/test/runs?api-version=$apiVersion"
+              $createRunBody = @{
+                  name = "Karate Test Run - $scenarioName"
+                  automated = $true
+                  pointIds = @($testPoint)
+              } | ConvertTo-Json
+              
+              Write-Host "Creating Test Run: $createRunUrl"
+              
+              try {
+                  $testRun = Invoke-RestMethod -Uri $createRunUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Post -Body $createRunBody -ContentType "application/json"
+                  
+                  # 3. Actualizar el resultado
+                  $updateResultUrl = "$organization$project/_apis/test/runs/$($testRun.id)/results?api-version=$apiVersion"
+                  $updateResultBody = @{
+                      testCaseTitle = $scenarioName
+                      testPoint = @{ id = $testPoint }
+                      outcome = $outcome
+                  } | ConvertTo-Json
+                  
+                  Write-Host "Updating Test Result: $updateResultUrl"
+                  
+                  $updateResponse = Invoke-RestMethod -Uri $updateResultUrl -Headers @{Authorization = "Basic $base64AuthInfo"} -Method Patch -Body $updateResultBody -ContentType "application/json"
+                  Write-Host "Successfully updated test case $testCaseId with outcome $outcome"
+              }
+              catch {
+                  Write-Host "Error updating test result: $_"
+              }
+          }
+          else {
+              Write-Host "No test points found for test case $testCaseId"
+          }
+      }
+      
+      # Procesar los resultados de Karate
       $jsonFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target" -Recurse -Filter "*.json"
       
       foreach ($file in $jsonFiles) {
-          Write-Host "Processing JSON file: $($file.FullName)"
+          Write-Host "Processing file: $($file.FullName)"
           try {
               $jsonContent = Get-Content $file -Raw | ConvertFrom-Json
               
               if ($jsonContent.elements) {
-                  Write-Host "Found test scenarios in JSON"
                   foreach ($element in $jsonContent.elements) {
                       if ($element.tags) {
                           foreach ($tag in $element.tags) {
-                              Write-Host "Processing tag: $($tag.name)"
                               if ($tag.name -match '@TestCase=(\d+)') {
                                   $testCaseId = $matches[1]
                                   $outcome = "Passed"
                                   $scenarioName = $element.name
                                   
-                                  # Verificar si hay pasos fallidos
                                   foreach ($step in $element.steps) {
                                       if ($step.result.status -eq "failed") {
                                           $outcome = "Failed"
-                                          Write-Host "Found failed step in scenario: $scenarioName"
                                           break
                                       }
                                   }
                                   
-                                  Write-Host "Updating Test Case #$testCaseId with result: $outcome for scenario: $scenarioName"
-                                  
-                                  # Usar el formato correcto para el comando de Azure DevOps
-                                  Write-Host "##vso[results.publishresult type=VSTest;resultName=$scenarioName;testCaseId=$testCaseId;outcome=$outcome]"
+                                  Write-Host "Updating Test Case #$testCaseId with outcome $outcome"
+                                  Update-TestCase -testCaseId $testCaseId -outcome $outcome -scenarioName $scenarioName
                               }
                           }
                       }
                   }
-              } else {
-                  Write-Host "No test scenarios found in JSON file"
               }
           }
           catch {
               Write-Host "Error processing JSON file: $_"
-              Write-Host "File content:"
-              Get-Content $file -Raw
-          }
-      }
-      
-      if (-not $jsonFiles) {
-          Write-Host "No JSON files found in target directory"
-          Write-Host "Listing target directory content:"
-          Get-ChildItem -Path "$(Build.SourcesDirectory)/target" -Recurse | ForEach-Object {
-              Write-Host $_.FullName
           }
       }
   displayName: 'Update Test Cases in Azure Test Plans'
