@@ -36,6 +36,10 @@ steps:
     mavenVersionOption: 'Default'
   displayName: 'Run Karate Tests'
 
+- script: |
+    ls -R $(Build.SourcesDirectory)/target/
+  displayName: 'List Target Directory Contents'
+
 - task: PublishTestResults@2
   condition: always()
   inputs:
@@ -49,15 +53,7 @@ steps:
 - task: PublishBuildArtifacts@1
   condition: always()
   inputs:
-    PathtoPublish: '$(Build.SourcesDirectory)/target/cucumber-reports'
-    ArtifactName: 'cucumber-reports'
+    PathtoPublish: '$(Build.SourcesDirectory)/target'
+    ArtifactName: 'test-reports'
     publishLocation: 'Container'
-  displayName: 'Publish Cucumber Reports'
-
-- task: PublishBuildArtifacts@1
-  condition: always()
-  inputs:
-    PathtoPublish: '$(Build.SourcesDirectory)/target/karate-reports'
-    ArtifactName: 'karate-reports'
-    publishLocation: 'Container'
-  displayName: 'Publish Karate Reports'
+  displayName: 'Publish All Test Reports'

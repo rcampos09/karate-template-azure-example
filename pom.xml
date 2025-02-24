@@ -27,7 +27,7 @@
             <groupId>net.masterthought</groupId>
             <artifactId>cucumber-reporting</artifactId>
             <version>5.7.5</version>
-        </dependency>		
+        </dependency>      
     </dependencies>
 
     <build>
@@ -56,56 +56,41 @@
                 <version>${maven.surefire.version}</version>
                 <configuration>
                     <argLine>-Dfile.encoding=UTF-8</argLine>
-                    <!-- Configuración para generar reportes XML compatibles con Azure DevOps -->
-                    <reportFormat>plain</reportFormat>
-                    <consoleOutputReporter>
-                        <disable>false</disable>
-                    </consoleOutputReporter>
-                    <statelessTestsetReporter implementation="org.apache.maven.plugin.surefire.extensions.junit5.JUnit5Xml30StatelessReporter">
-                        <disable>false</disable>
-                        <version>3.0</version>
-                        <usePhrasedFileName>false</usePhrasedFileName>
-                        <usePhrasedTestSuiteClassName>true</usePhrasedTestSuiteClassName>
-                        <usePhrasedTestCaseClassName>true</usePhrasedTestCaseClassName>
-                        <usePhrasedTestCaseMethodName>true</usePhrasedTestCaseMethodName>
-                    </statelessTestsetReporter>
-                    <!-- Configuración para mostrar logs en consola -->
-                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
-                    <trimStackTrace>false</trimStackTrace>
-                    <!-- Propiedades del sistema para Karate -->
-                    <systemProperties>
+                    <systemPropertyVariables>
                         <karate.env>qa</karate.env>
-                        <karate.options>--tags ~@ignore</karate.options>
-                    </systemProperties>
+                    </systemPropertyVariables>
+                    <includes>
+                        <include>**/*Runner.java</include>
+                    </includes>
+                    <useFile>false</useFile>
                 </configuration>
             </plugin>
-            <!-- Plugin para generar reportes Cucumber -->
-<plugin>
-                <groupId>net.masterthought</groupId>
-                <artifactId>maven-cucumber-reporting</artifactId>
-                <version>5.0.0</version>
-                <executions>
-                    <execution>
-                        <id>execution</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>generate</goal>
-                        </goals>
-                        <configuration>
-                            <projectName>Karate API Tests</projectName>
-                            <outputDirectory>${project.build.directory}/cucumber-reports</outputDirectory>
-                            <inputDirectory>${project.build.directory}</inputDirectory>
-                            <jsonFiles>
-                                <param>**/karate-reports/*.json</param>
-                            </jsonFiles>
-                            <mergeFeaturesById>false</mergeFeaturesById>
-                            <mergeFeaturesWithRetest>false</mergeFeaturesWithRetest>
-                            <checkBuildResult>false</checkBuildResult>
-                            <skipEmptyJSONFiles>true</skipEmptyJSONFiles>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
+                <plugin>
+                    <groupId>net.masterthought</groupId>
+                    <artifactId>maven-cucumber-reporting</artifactId>
+                    <version>5.0.0</version>
+                    <executions>
+                        <execution>
+                            <id>execution</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>generate</goal>
+                            </goals>
+                            <configuration>
+                                <projectName>Karate API Tests</projectName>
+                                <outputDirectory>${project.build.directory}/cucumber-reports</outputDirectory>
+                                <inputDirectory>${project.build.directory}/karate-reports</inputDirectory>
+                                <jsonFiles>
+                                    <param>**/*.json</param>
+                                </jsonFiles>
+                                <mergeFeaturesById>false</mergeFeaturesById>
+                                <mergeFeaturesWithRetest>false</mergeFeaturesWithRetest>
+                                <checkBuildResult>false</checkBuildResult>
+                                <skipEmptyJSONFiles>true</skipEmptyJSONFiles>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
         </plugins>        
     </build>       
 </project>

@@ -7,8 +7,10 @@ class UsersRunner {
     @Karate.Test
     Karate testUsers() {
         return Karate.run("TC12345_ValidarLogin")
-                     .outputCucumberJson(true)
+                     .outputCucumberJson(true)  // Asegura que genera JSON
+                     .reportDir("target/cucumber-reports") // Define el directorio de reportes
                      .karateEnv("qa")
                      .relativeTo(getClass());
     }
+    
 }
