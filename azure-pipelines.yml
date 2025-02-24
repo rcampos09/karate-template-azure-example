@@ -48,7 +48,20 @@ steps:
     mergeTestResults: true
     failTaskOnFailedTests: true
     testRunTitle: 'Karate Tests'
+    testRunSystem: 'VSTest'
   displayName: 'Publish Test Results'
+
+- script: |
+    curl -X POST -u "$(System.AccessToken):" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -d '{
+          "testPlan": { "id": 6 },
+          "testSuite": { "id": 8 },
+          "runId": "$(Build.BuildId)"
+        }' \
+    "https://dev.azure.com/dontester/Automated%20Test%20Plan/_apis/test/Runs?api-version=6.0"
+  displayName: 'Associate Test Results via REST API'
 
 - task: PublishBuildArtifacts@1
   condition: always()
