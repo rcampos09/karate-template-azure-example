@@ -6,7 +6,9 @@ class UsersRunner {
     
     @Karate.Test
     Karate testUsers() {
-        return Karate.run("TC12345_ValidarLogin").relativeTo(getClass());
-    }    
-
+        return Karate.run("TC12345_ValidarLogin")
+                     .outputCucumberJson(true)
+                     .karateEnv("qa")
+                     .relativeTo(getClass());
+    }
 }

@@ -1,4 +1,3 @@
-# TC12345_ValidarLogin.feature
 Feature: API Authentication and User Management Tests
 
 Background: 
@@ -8,7 +7,7 @@ Background:
     * configure logPrettyResponse = true
 
 @TestCase=9
-Scenario: Login exitoso con credenciales válidas
+Scenario: TC9_Login exitoso con credenciales válidas
     Given path '/login'
     And request testData.validUser
     When method POST
@@ -18,7 +17,7 @@ Scenario: Login exitoso con credenciales válidas
     * print 'Response time:', responseTime, 'ms'
 
 @TestCase=10
-Scenario: Login fallido con credenciales inválidas
+Scenario: TC10_Login fallido con credenciales inválidas
     Given path '/login'
     And request testData.invalidUser
     When method POST
@@ -27,7 +26,7 @@ Scenario: Login fallido con credenciales inválidas
     * print 'Error message:', response.error
 
 @TestCase=11
-Scenario: Crear nuevo usuario
+Scenario: TC11_Crear nuevo usuario
     Given path '/users'
     And request testData.newUser
     When method POST
