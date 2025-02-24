@@ -42,14 +42,17 @@ steps:
   displayName: 'Run Karate Tests with Debug'
 
 - bash: |
+    echo "Listing Surefire Reports:"
     ls -l $(Build.SourcesDirectory)/target/surefire-reports
-  displayName: 'List Surefire Reports'
+    echo "Listing Karate Reports:"
+    ls -l $(Build.SourcesDirectory)/target/karate-reports
+  displayName: 'List Test Reports'
 
 - task: PublishTestResults@2
   condition: always()
   inputs:
     testResultsFormat: 'JUnit'
-    testResultsFiles: '**/target/**/TEST-*.xml'
+    testResultsFiles: '**/target/surefire-reports/*.xml;**/target/karate-reports/*.xml'
     mergeTestResults: true
     failTaskOnFailedTests: true
     testRunTitle: 'Karate Tests'
