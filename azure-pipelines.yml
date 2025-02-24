@@ -16,11 +16,6 @@ steps:
     jdkSourceOption: 'PreInstalled'
   displayName: 'Set up JDK 17'
 
-# Crear el directorio de caché si no existe
-- bash: |
-    mkdir -p $(MAVEN_CACHE_FOLDER)
-  displayName: 'Create Maven cache directory'
-
 - task: Cache@2
   inputs:
     key: 'maven | "$(Agent.OS)" | **/pom.xml'
@@ -32,21 +27,14 @@ steps:
 - task: Maven@4
   inputs:
     mavenPomFile: 'pom.xml'
-    goals: 'clean verify'
-    options: '-Dkarate.env=qa -X'
+    goals: 'clean test'
+    options: '-Dkarate.env=qa'
     publishJUnitResults: true 
     testResultsFiles: '**/target/**/TEST-*.xml'
     javaHomeOption: 'JDKVersion'
     jdkVersionOption: '1.17'
     mavenVersionOption: 'Default'
-  displayName: 'Run Karate Tests with Debug'
-
-- bash: |
-    echo "Listing Surefire Reports:"
-    ls -l $(Build.SourcesDirectory)/target/surefire-reports
-    echo "Listing Karate Reports:"
-    ls -l $(Build.SourcesDirectory)/target/karate-reports
-  displayName: 'List Test Reports'
+  displayName: 'Run Karate Tests'
 
 - task: PublishTestResults@2
   condition: always()
