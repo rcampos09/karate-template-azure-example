@@ -33,19 +33,23 @@ steps:
   inputs:
     mavenPomFile: 'pom.xml'
     goals: 'clean verify'
-    options: '-Dkarate.env=qa'
+    options: '-Dkarate.env=qa -X'
     publishJUnitResults: true 
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    testResultsFiles: '**/target/**/TEST-*.xml'
     javaHomeOption: 'JDKVersion'
     jdkVersionOption: '1.17'
     mavenVersionOption: 'Default'
-  displayName: 'Run Karate Tests'
+  displayName: 'Run Karate Tests with Debug'
+
+- bash: |
+    ls -l $(Build.SourcesDirectory)/target/surefire-reports
+  displayName: 'List Surefire Reports'
 
 - task: PublishTestResults@2
   condition: always()
   inputs:
     testResultsFormat: 'JUnit'
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    testResultsFiles: '**/target/**/TEST-*.xml'
     mergeTestResults: true
     failTaskOnFailedTests: true
     testRunTitle: 'Karate Tests'
