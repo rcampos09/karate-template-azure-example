@@ -159,7 +159,13 @@ steps:
                       $stackTrace = $testcase.error.'#text'
                   }
 
-                  $duration = [int]($testcase.time -as [double] * 1000)
+                  # Convertir duration de forma segura
+                  $timeValue = $testcase.time
+                  if ($timeValue -is [string]) {
+                      $duration = [int]([double]::Parse($timeValue, [System.Globalization.CultureInfo]::InvariantCulture) * 1000)
+                  } else {
+                      $duration = [int]([double]$timeValue * 1000)
+                  }
 
                   Write-Host "  [$iterationNumber] Test Case $testCaseId - $outcome ($duration ms) - $iterationParams"
 
