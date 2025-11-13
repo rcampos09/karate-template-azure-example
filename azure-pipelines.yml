@@ -301,46 +301,75 @@ steps:
 
           Write-Host "`n✓ Todos los resultados publicados"
 
-          # Adjuntar reportes de Karate al Test Run
+          # Adjuntar reportes de Karate al Test Run (en formato ZIP)
           Write-Host "`n========================================"
-          Write-Host "Adjuntando reportes de Karate al Test Run..."
+          Write-Host "Creando y adjuntando reportes de Karate al Test Run..."
           Write-Host "========================================"
 
-          $reportsPath = "$(Build.SourcesDirectory)/target/cucumber-reports"
-          $htmlReports = @(
-              "karate-summary.html",
-              "karate-timeline.html",
-              "karate-tags.html"
-          )
+          $targetPath = "$(Build.SourcesDirectory)/target"
+          $tempZipPath = "$(Build.SourcesDirectory)/temp-zips"
 
-          foreach ($reportFile in $htmlReports) {
-              $reportPath = Join-Path $reportsPath $reportFile
-              if (Test-Path $reportPath) {
-                  try {
-                      # Leer el archivo como bytes y convertir a Base64
-                      $fileContent = [System.IO.File]::ReadAllBytes($reportPath)
-                      $base64Content = [System.Convert]::ToBase64String($fileContent)
+          # Crear directorio temporal para ZIPs
+          New-Item -ItemType Directory -Force -Path $tempZipPath | Out-Null
 
-                      # Crear attachment
-                      $attachmentBody = @{
-                          stream = $base64Content
-                          fileName = $reportFile
-                          comment = "Karate Test Report"
-                          attachmentType = "GeneralAttachment"
-                      } | ConvertTo-Json
+          # 1. Comprimir karate.log
+          $karateLogPath = Join-Path $targetPath "karate.log"
+          if (Test-Path $karateLogPath) {
+              try {
+                  $karateLogZip = Join-Path $tempZipPath "karate-log.zip"
+                  Compress-Archive -Path $karateLogPath -DestinationPath $karateLogZip -Force
+                  Write-Host "  ✓ Creado: karate-log.zip"
 
-                      $attachmentUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/attachments?api-version=7.0"
-                      Invoke-RestMethod -Uri $attachmentUrl -Method Post -Headers $headers -Body $attachmentBody | Out-Null
-                      Write-Host "  ✓ Adjuntado: $reportFile"
-                  } catch {
-                      Write-Host "  ⚠ Error al adjuntar $reportFile : $($_.Exception.Message)"
-                  }
-              } else {
-                  Write-Host "  ⚠ No se encontró: $reportFile"
+                  # Adjuntar al Test Run
+                  $fileContent = [System.IO.File]::ReadAllBytes($karateLogZip)
+                  $base64Content = [System.Convert]::ToBase64String($fileContent)
+                  $attachmentBody = @{
+                      stream = $base64Content
+                      fileName = "karate-log.zip"
+                      comment = "Karate Execution Log"
+                      attachmentType = "GeneralAttachment"
+                  } | ConvertTo-Json
+                  $attachmentUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/attachments?api-version=7.0"
+                  Invoke-RestMethod -Uri $attachmentUrl -Method Post -Headers $headers -Body $attachmentBody | Out-Null
+                  Write-Host "  ✓ Adjuntado: karate-log.zip al Test Run"
+              } catch {
+                  Write-Host "  ⚠ Error con karate-log.zip: $($_.Exception.Message)"
               }
+          } else {
+              Write-Host "  ⚠ No se encontró: karate.log"
           }
 
-          Write-Host "`n✓ Reportes adjuntados al Test Run"
+          # 2. Comprimir cucumber-reports/
+          $cucumberReportsPath = Join-Path $targetPath "cucumber-reports"
+          if (Test-Path $cucumberReportsPath) {
+              try {
+                  $cucumberReportsZip = Join-Path $tempZipPath "cucumber-reports.zip"
+                  Compress-Archive -Path "$cucumberReportsPath/*" -DestinationPath $cucumberReportsZip -Force
+                  Write-Host "  ✓ Creado: cucumber-reports.zip"
+
+                  # Adjuntar al Test Run
+                  $fileContent = [System.IO.File]::ReadAllBytes($cucumberReportsZip)
+                  $base64Content = [System.Convert]::ToBase64String($fileContent)
+                  $attachmentBody = @{
+                      stream = $base64Content
+                      fileName = "cucumber-reports.zip"
+                      comment = "Karate HTML Reports"
+                      attachmentType = "GeneralAttachment"
+                  } | ConvertTo-Json
+                  $attachmentUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/attachments?api-version=7.0"
+                  Invoke-RestMethod -Uri $attachmentUrl -Method Post -Headers $headers -Body $attachmentBody | Out-Null
+                  Write-Host "  ✓ Adjuntado: cucumber-reports.zip al Test Run"
+              } catch {
+                  Write-Host "  ⚠ Error con cucumber-reports.zip: $($_.Exception.Message)"
+              }
+          } else {
+              Write-Host "  ⚠ No se encontró: cucumber-reports/"
+          }
+
+          # Limpiar directorio temporal
+          Remove-Item -Path $tempZipPath -Recurse -Force -ErrorAction SilentlyContinue
+
+          Write-Host "`n✓ Reportes comprimidos y adjuntados al Test Run"
 
           # Completar el Test Run
           Write-Host "`nCompletando Test Run $testRunId..."
