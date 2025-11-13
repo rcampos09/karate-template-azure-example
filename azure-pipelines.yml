@@ -260,23 +260,40 @@ steps:
               $publishUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/results?api-version=7.0"
 
               try {
+                  # Debug: Mostrar el primer resultado para verificar formato
+                  if ($i -eq 0) {
+                      Write-Host "  Sample result (first item):"
+                      Write-Host ($batch[0] | ConvertTo-Json -Depth 5)
+                  }
+
                   $publishedResults = Invoke-RestMethod -Uri $publishUrl -Method Post -Headers $headers -Body $publishBody
                   Write-Host "  ✓ Lote $($i+1) publicado exitosamente"
               } catch {
                   Write-Host "  ✗ Error al publicar lote $($i+1): $($_.Exception.Message)"
+                  Write-Host "  Response: $($_.Exception.Response)"
+                  if ($_.ErrorDetails.Message) {
+                      Write-Host "  Error Details: $($_.ErrorDetails.Message)"
+                  }
               }
           }
 
           Write-Host "`n✓ Todos los resultados publicados"
 
           # Completar el Test Run
+          Write-Host "`nCompletando Test Run $testRunId..."
           $updateRunBody = @{
               state = "Completed"
           } | ConvertTo-Json
 
-          $updateRunUrl = "$orgUrl/$project/_apis/test/runs/$testRunId?api-version=7.0"
-          Invoke-RestMethod -Uri $updateRunUrl -Method Patch -Headers $headers -Body $updateRunBody
-          Write-Host "✓ Test Run $testRunId completado"
+          $updateRunUrl = "$orgUrl/$project/_apis/test/runs/$($testRunId)?api-version=7.0"
+          Write-Host "URL: $updateRunUrl"
+
+          try {
+              Invoke-RestMethod -Uri $updateRunUrl -Method Patch -Headers $headers -Body $updateRunBody
+              Write-Host "✓ Test Run $testRunId completado"
+          } catch {
+              Write-Host "⚠ Error al completar Test Run: $($_.Exception.Message)"
+          }
 
           Write-Host "`n========================================"
           Write-Host "RESUMEN FINAL:"
