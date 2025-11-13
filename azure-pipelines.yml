@@ -301,6 +301,47 @@ steps:
 
           Write-Host "`n✓ Todos los resultados publicados"
 
+          # Adjuntar reportes de Karate al Test Run
+          Write-Host "`n========================================"
+          Write-Host "Adjuntando reportes de Karate al Test Run..."
+          Write-Host "========================================"
+
+          $reportsPath = "$(Build.SourcesDirectory)/target/cucumber-reports"
+          $htmlReports = @(
+              "karate-summary.html",
+              "karate-timeline.html",
+              "karate-tags.html"
+          )
+
+          foreach ($reportFile in $htmlReports) {
+              $reportPath = Join-Path $reportsPath $reportFile
+              if (Test-Path $reportPath) {
+                  try {
+                      # Leer el archivo como bytes y convertir a Base64
+                      $fileContent = [System.IO.File]::ReadAllBytes($reportPath)
+                      $base64Content = [System.Convert]::ToBase64String($fileContent)
+
+                      # Crear attachment
+                      $attachmentBody = @{
+                          stream = $base64Content
+                          fileName = $reportFile
+                          comment = "Karate Test Report"
+                          attachmentType = "GeneralAttachment"
+                      } | ConvertTo-Json
+
+                      $attachmentUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/attachments?api-version=7.0"
+                      Invoke-RestMethod -Uri $attachmentUrl -Method Post -Headers $headers -Body $attachmentBody | Out-Null
+                      Write-Host "  ✓ Adjuntado: $reportFile"
+                  } catch {
+                      Write-Host "  ⚠ Error al adjuntar $reportFile : $($_.Exception.Message)"
+                  }
+              } else {
+                  Write-Host "  ⚠ No se encontró: $reportFile"
+              }
+          }
+
+          Write-Host "`n✓ Reportes adjuntados al Test Run"
+
           # Completar el Test Run
           Write-Host "`nCompletando Test Run $testRunId..."
           $updateRunBody = @{
