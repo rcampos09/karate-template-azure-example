@@ -202,8 +202,8 @@ steps:
       }
       Write-Host "========================================"
 
-      # Obtener Test Points para el Test Suite
-      $testPointsUrl = "$orgUrl/$project/_apis/test/plans/$testPlanId/suites/$testSuiteId/points?api-version=7.0"
+      # Obtener Test Points para el Test Suite (incluir workItemProperties para obtener revision)
+      $testPointsUrl = "$orgUrl/$project/_apis/test/plans/$testPlanId/suites/$testSuiteId/points?includePointDetails=true&api-version=7.0"
       $testPoints = Invoke-RestMethod -Uri $testPointsUrl -Method Get -Headers $headers
       Write-Host "`n✓ Test Points obtenidos: $($testPoints.count)"
 
@@ -220,13 +220,23 @@ steps:
               # Obtener información del Test Case desde el Test Point
               $testCaseRef = $testPoint.testCase
 
+              # Obtener detalles completos del Test Case para revision
+              $testCaseUrl = "$orgUrl/$project/_apis/wit/workitems/$($iteration.testCaseId)?api-version=7.0"
+              try {
+                  $testCaseDetails = Invoke-RestMethod -Uri $testCaseUrl -Method Get -Headers $headers
+                  $testCaseRevision = $testCaseDetails.rev
+              } catch {
+                  Write-Host "⚠ No se pudo obtener revision para Test Case $($iteration.testCaseId), usando 1 por defecto"
+                  $testCaseRevision = 1
+              }
+
               # Crear resultado con información de iteración (incluyendo campos requeridos por Azure DevOps)
               $resultData = @{
                   testCase = @{
                       id = [string]$iteration.testCaseId  # Debe ser string según API
                   }
                   testCaseTitle = $iteration.testCaseTitle
-                  testCaseRevision = $testCaseRef.revision  # Campo requerido
+                  testCaseRevision = $testCaseRevision  # Campo requerido
                   testPoint = @{ id = [string]$testPoint.id }  # Debe ser string
                   outcome = $iteration.outcome
                   state = "Completed"
