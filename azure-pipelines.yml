@@ -132,7 +132,7 @@ steps:
 
               # Extraer el TestCase ID del nombre del test
               if ($testName -match 'TC(\d+)_(.+?)\s') {
-                  $testCaseId = $Matches[1]
+                  $testCaseId = [int]$Matches[1]  # Convertir a int
                   $testCaseTitle = "TC$($testCaseId)_" + $Matches[2].Trim()
 
                   # Contador de iteraciones por Test Case
@@ -220,13 +220,14 @@ steps:
               # Obtener información del Test Case desde el Test Point
               $testCaseRef = $testPoint.testCase
 
-              # Crear resultado con información de iteración
+              # Crear resultado con información de iteración (incluyendo campos requeridos por Azure DevOps)
               $resultData = @{
                   testCase = @{
-                      id = $iteration.testCaseId
+                      id = [string]$iteration.testCaseId  # Debe ser string según API
                   }
                   testCaseTitle = $iteration.testCaseTitle
-                  testPoint = @{ id = $testPoint.id }
+                  testCaseRevision = $testCaseRef.revision  # Campo requerido
+                  testPoint = @{ id = [string]$testPoint.id }  # Debe ser string
                   outcome = $iteration.outcome
                   state = "Completed"
                   durationInMs = $iteration.duration
