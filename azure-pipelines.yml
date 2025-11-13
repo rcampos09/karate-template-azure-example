@@ -85,7 +85,7 @@ steps:
       Write-Host "Creando Test Run para Test Plan $testPlanId..."
       Write-Host "========================================"
 
-      # Crear Test Run
+      # Crear Test Run con configuración
       $testRunBody = @{
           name = "Karate Automated Run - Build $(Build.BuildNumber)"
           plan = @{ id = $testPlanId }
@@ -93,6 +93,8 @@ steps:
           build = @{ id = "$(Build.BuildId)" }
           buildPlatform = "Karate"
           buildFlavor = "qa"
+          configurationIds = @()  # Se puede agregar ID de configuración si existe
+          comment = "Automated test execution from Azure Pipeline"
       } | ConvertTo-Json -Depth 10
 
       $createRunUrl = "$orgUrl/$project/_apis/test/runs?api-version=7.0"
@@ -229,6 +231,15 @@ steps:
                   durationInMs = $iteration.duration
                   automatedTestName = $iteration.automatedTestName
                   comment = "Iteration $($iteration.iterationNumber) - $($iteration.iterationParams)"
+                  # Campos adicionales para mostrar en Test Results
+                  priority = if ($testPoint.priority) { $testPoint.priority } else { 2 }  # Priority por defecto: 2
+                  owner = if ($testPoint.assignedTo) { $testPoint.assignedTo } else { $null }
+                  configuration = @{ name = "qa" }  # Configuración del ambiente
+                  iterationDetails = @( @{
+                      id = $iteration.iterationNumber
+                      outcome = $iteration.outcome
+                      duration = $iteration.duration
+                  } )
               }
 
               # Agregar mensaje de error si existe
