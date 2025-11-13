@@ -12,5 +12,4 @@ class UsersRunner {
                      .karateEnv("qa")
                      .relativeTo(getClass());
     }
-    
 }

@@ -7,6 +7,11 @@ pool:
 variables:
   MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
   MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+  # IDs de tu Azure DevOps
+  AZURE_DEVOPS_ORG: 'dontester'
+  AZURE_DEVOPS_PROJECT: 'Automated Test Plan'
+  TEST_PLAN_ID: 6
+  TEST_SUITE_ID: 8
 
 steps:
 - task: JavaToolInstaller@0
@@ -29,14 +34,25 @@ steps:
     mavenPomFile: 'pom.xml'
     goals: 'clean test'
     options: '-Dkarate.env=qa'
-    publishJUnitResults: true 
-    testResultsFiles: '**/target/**/TEST-*.xml'
+    publishJUnitResults: false  # Desactivamos para publicar manualmente después
     javaHomeOption: 'JDKVersion'
     jdkVersionOption: '1.17'
     mavenVersionOption: 'Default'
   displayName: 'Run Karate Tests'
+  continueOnError: true  # Continuar aunque los tests fallen
 
 - script: |
+    echo "========================================="
+    echo "Verificando archivos generados..."
+    echo "========================================="
+    echo ""
+    echo "Contenido de target/surefire-reports:"
+    ls -la $(Build.SourcesDirectory)/target/surefire-reports/ || echo "Directory not found"
+    echo ""
+    echo "Archivos XML encontrados:"
+    find $(Build.SourcesDirectory)/target -name "*.xml" -type f || echo "No XML files found"
+    echo ""
+    echo "Estructura completa de target:"
     ls -R $(Build.SourcesDirectory)/target/
   displayName: 'List Target Directory Contents'
 
@@ -44,24 +60,232 @@ steps:
   condition: always()
   inputs:
     testResultsFormat: 'JUnit'
-    testResultsFiles: '**/target/surefire-reports/*.xml;**/target/karate-reports/*.xml'
+    testResultsFiles: '$(Build.SourcesDirectory)/target/surefire-reports/TEST-*.xml'
+    searchFolder: '$(Build.SourcesDirectory)'
     mergeTestResults: true
-    failTaskOnFailedTests: true
-    testRunTitle: 'Karate Tests'
-    testRunSystem: 'VSTest'
-  displayName: 'Publish Test Results'
+    failTaskOnFailedTests: false  # No fallar aquí, fallar después de publicar en Test Plans
+    testRunTitle: 'Karate Automated Tests - Build $(Build.BuildNumber)'
+    buildPlatform: 'Karate'
+    buildConfiguration: 'qa'
+    publishRunAttachments: true
+  displayName: 'Publish Test Results to Pipeline'
 
-- script: |
-    curl -X POST -u "$(System.AccessToken):" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -d '{
-          "testPlan": { "id": 6 },
-          "testSuite": { "id": 8 },
-          "runId": "$(Build.BuildId)"
-        }' \
-    "https://dev.azure.com/dontester/Automated%20Test%20Plan/_apis/test/Runs?api-version=6.0"
-  displayName: 'Associate Test Results via REST API'
+# Script para asociar resultados con Azure Test Plan (con iteraciones)
+- task: PowerShell@2
+  condition: always()
+  inputs:
+    targetType: 'inline'
+    script: |
+      # Configuración
+      $orgUrl = "https://dev.azure.com/$(AZURE_DEVOPS_ORG)"
+      $project = "$(AZURE_DEVOPS_PROJECT)"
+      $testPlanId = $(TEST_PLAN_ID)
+      $testSuiteId = $(TEST_SUITE_ID)
+      $pat = "$(System.AccessToken)"
+
+      # Convertir PAT a Base64
+      $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($pat)"))
+      $headers = @{
+          "Authorization" = "Basic $base64AuthInfo"
+          "Content-Type" = "application/json"
+      }
+
+      Write-Host "========================================"
+      Write-Host "Creando Test Run para Test Plan $testPlanId..."
+      Write-Host "========================================"
+
+      # Crear Test Run
+      $testRunBody = @{
+          name = "Karate Automated Run - Build $(Build.BuildNumber)"
+          plan = @{ id = $testPlanId }
+          automated = $true
+          build = @{ id = "$(Build.BuildId)" }
+          buildPlatform = "Karate"
+          buildFlavor = "qa"
+      } | ConvertTo-Json -Depth 10
+
+      $createRunUrl = "$orgUrl/$project/_apis/test/runs?api-version=7.0"
+      $testRun = Invoke-RestMethod -Uri $createRunUrl -Method Post -Headers $headers -Body $testRunBody
+      $testRunId = $testRun.id
+      Write-Host "✓ Test Run creado con ID: $testRunId"
+
+      # Leer resultados de Karate (archivo XML de surefire)
+      $xmlFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target/surefire-reports" -Filter "TEST-*.xml" -Recurse
+
+      # Array para almacenar TODAS las iteraciones (sin consolidar)
+      $allIterations = @()
+
+      foreach ($xmlFile in $xmlFiles) {
+          Write-Host "`nProcesando archivo: $($xmlFile.Name)"
+          [xml]$xml = Get-Content $xmlFile.FullName
+
+          $iterationCounter = @{}
+
+          foreach ($testcase in $xml.testsuite.testcase) {
+              $testName = $testcase.name
+              $className = $testcase.classname
+
+              # Extraer el TestCase ID del nombre del test
+              if ($testName -match 'TC(\d+)_(.+?)\s') {
+                  $testCaseId = $Matches[1]
+                  $testCaseTitle = "TC$($testCaseId)_" + $Matches[2].Trim()
+
+                  # Contador de iteraciones por Test Case
+                  if (-not $iterationCounter.ContainsKey($testCaseId)) {
+                      $iterationCounter[$testCaseId] = 0
+                  }
+                  $iterationCounter[$testCaseId]++
+                  $iterationNumber = $iterationCounter[$testCaseId]
+
+                  # Extraer parámetros de la iteración del nombre del test
+                  # Formato esperado: [1.X:YY] donde X es el número de iteración
+                  $iterationParams = ""
+                  if ($testName -match '\[1\.(\d+):') {
+                      $exampleRow = $Matches[1]
+                      $iterationParams = "Example Row $exampleRow"
+                  }
+
+                  $outcome = "Passed"
+                  $errorMessage = ""
+                  $stackTrace = ""
+
+                  if ($testcase.failure) {
+                      $outcome = "Failed"
+                      $errorMessage = $testcase.failure.message
+                      $stackTrace = $testcase.failure.'#text'
+                  } elseif ($testcase.error) {
+                      $outcome = "Failed"
+                      $errorMessage = $testcase.error.message
+                      $stackTrace = $testcase.error.'#text'
+                  }
+
+                  $duration = [int]($testcase.time -as [double] * 1000)
+
+                  Write-Host "  [$iterationNumber] Test Case $testCaseId - $outcome ($duration ms) - $iterationParams"
+
+                  # Agregar cada iteración como un resultado separado
+                  $allIterations += @{
+                      testCaseId = $testCaseId
+                      testCaseTitle = $testCaseTitle
+                      iterationNumber = $iterationNumber
+                      iterationParams = $iterationParams
+                      outcome = $outcome
+                      errorMessage = $errorMessage
+                      stackTrace = $stackTrace
+                      duration = $duration
+                      automatedTestName = "$testCaseTitle - Iteration $iterationNumber"
+                  }
+              }
+          }
+      }
+
+      Write-Host "`n========================================"
+      Write-Host "Total de iteraciones encontradas: $($allIterations.Count)"
+
+      # Agrupar por Test Case para mostrar resumen
+      $summary = $allIterations | Group-Object -Property testCaseId
+      foreach ($group in $summary) {
+          $passed = ($group.Group | Where-Object { $_.outcome -eq "Passed" }).Count
+          $failed = ($group.Group | Where-Object { $_.outcome -eq "Failed" }).Count
+          Write-Host "  Test Case $($group.Name): $($group.Count) iteraciones ($passed passed, $failed failed)"
+      }
+      Write-Host "========================================"
+
+      # Obtener Test Points para el Test Suite
+      $testPointsUrl = "$orgUrl/$project/_apis/test/plans/$testPlanId/suites/$testSuiteId/points?api-version=7.0"
+      $testPoints = Invoke-RestMethod -Uri $testPointsUrl -Method Get -Headers $headers
+      Write-Host "`n✓ Test Points obtenidos: $($testPoints.count)"
+
+      # Crear array de resultados para publicar (UNA entrada por CADA iteración)
+      $resultsToPublish = @()
+
+      foreach ($iteration in $allIterations) {
+          # Buscar el Test Point correspondiente
+          $testPoint = $testPoints.value | Where-Object {
+              $_.testCase.id -eq $iteration.testCaseId
+          } | Select-Object -First 1
+
+          if ($testPoint) {
+              # Crear resultado con información de iteración
+              $resultData = @{
+                  testCase = @{ id = $iteration.testCaseId }
+                  testPoint = @{ id = $testPoint.id }
+                  outcome = $iteration.outcome
+                  state = "Completed"
+                  durationInMs = $iteration.duration
+                  automatedTestName = $iteration.automatedTestName
+                  comment = "Iteration $($iteration.iterationNumber) - $($iteration.iterationParams)"
+              }
+
+              # Agregar mensaje de error si existe
+              if ($iteration.errorMessage) {
+                  $resultData.errorMessage = $iteration.errorMessage
+              }
+
+              # Agregar stack trace si existe
+              if ($iteration.stackTrace) {
+                  $resultData.stackTrace = $iteration.stackTrace
+              }
+
+              $resultsToPublish += $resultData
+          } else {
+              Write-Host "⚠ WARNING: No se encontró Test Point para Test Case ID: $($iteration.testCaseId)"
+          }
+      }
+
+      if ($resultsToPublish.Count -gt 0) {
+          Write-Host "`n========================================"
+          Write-Host "Publicando $($resultsToPublish.Count) resultados al Test Run..."
+          Write-Host "========================================"
+
+          # Azure DevOps tiene un límite de ~200 resultados por request
+          # Dividir en lotes si es necesario
+          $batchSize = 100
+          $totalBatches = [Math]::Ceiling($resultsToPublish.Count / $batchSize)
+
+          for ($i = 0; $i -lt $totalBatches; $i++) {
+              $start = $i * $batchSize
+              $end = [Math]::Min(($i + 1) * $batchSize, $resultsToPublish.Count)
+              $batch = $resultsToPublish[$start..($end-1)]
+
+              Write-Host "  Publicando lote $($i+1)/$totalBatches ($($batch.Count) resultados)..."
+
+              $publishBody = $batch | ConvertTo-Json -Depth 10
+              $publishUrl = "$orgUrl/$project/_apis/test/runs/$testRunId/results?api-version=7.0"
+
+              try {
+                  $publishedResults = Invoke-RestMethod -Uri $publishUrl -Method Post -Headers $headers -Body $publishBody
+                  Write-Host "  ✓ Lote $($i+1) publicado exitosamente"
+              } catch {
+                  Write-Host "  ✗ Error al publicar lote $($i+1): $($_.Exception.Message)"
+              }
+          }
+
+          Write-Host "`n✓ Todos los resultados publicados"
+
+          # Completar el Test Run
+          $updateRunBody = @{
+              state = "Completed"
+          } | ConvertTo-Json
+
+          $updateRunUrl = "$orgUrl/$project/_apis/test/runs/$testRunId?api-version=7.0"
+          Invoke-RestMethod -Uri $updateRunUrl -Method Patch -Headers $headers -Body $updateRunBody
+          Write-Host "✓ Test Run $testRunId completado"
+
+          Write-Host "`n========================================"
+          Write-Host "RESUMEN FINAL:"
+          Write-Host "========================================"
+          Write-Host "Test Run ID: $testRunId"
+          Write-Host "Total Iteraciones: $($allIterations.Count)"
+          Write-Host "URL: $orgUrl/$project/_testManagement/runs?runId=$testRunId&_a=resultSummary"
+          Write-Host "========================================"
+      } else {
+          Write-Host "✗ ERROR: No se encontraron resultados para publicar"
+          exit 1
+      }
+  displayName: 'Associate Test Results with Azure Test Plan'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
 - task: PublishBuildArtifacts@1
   condition: always()

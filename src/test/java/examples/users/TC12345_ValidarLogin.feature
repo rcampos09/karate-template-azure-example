@@ -1,37 +1,70 @@
 Feature: API Authentication and User Management Tests
 
-Background: 
+Background:
     * url apiUrl
     * header Accept = 'application/json'
     * header Content-Type = 'application/json'
+    * header x-api-key = 'reqres-free-v1'
     * configure logPrettyResponse = true
 
 @TestCase=9
-Scenario: TC9_Login exitoso con credenciales válidas
+@Offline
+Scenario Outline: TC9_Login exitoso con credenciales válidas
     Given path '/login'
-    And request testData.validUser
+    And request { "email": "<email>", "password": "<password>" }
     When method POST
-    Then status 200
+    Then status <expectedStatus>
     And match response contains { token: '#string' }
-    * assert responseTime < testData.timeoutMs
+    * assert responseTime < <timeout>
     * print 'Response time:', responseTime, 'ms'
 
+Examples:
+    | email                     | password    | expectedStatus | timeout |
+    | eve.holt@reqres.in        | cityslicka  | 200            | 2000    |
+    | george.bluth@reqres.in    | cityslicka  | 200            | 2000    |
+    | janet.weaver@reqres.in    | cityslicka  | 200            | 2000    |
+    | emma.wong@reqres.in       | cityslicka  | 200            | 2000    |
+    | charles.morris@reqres.in  | cityslicka  | 200            | 2000    |
+    | tracey.ramos@reqres.in    | cityslicka  | 200            | 2000    |
+
+
 @TestCase=10
-Scenario: TC10_Login fallido con credenciales inválidas
+@Offline
+Scenario Outline: TC10_Login fallido con credenciales inválidas
     Given path '/login'
-    And request testData.invalidUser
+    And request { "email": "<email>", "password": "<password>" }
     When method POST
-    Then status 400
+    Then status <expectedStatus>
     And match response.error == '#string'
     * print 'Error message:', response.error
 
+Examples:
+    | email                | password   | expectedStatus |
+    | invalid@reqres.in    | wrongpass  | 400            |
+    | invalid2@reqres.in   | wrongpass  | 400            |
+    | invalid3@reqres.in   | wrongpass  | 400            |
+    | invalid4@reqres.in   | wrongpass  | 400            |
+    | invalid5@reqres.in   | wrongpass  | 400            |
+    | invalid6@reqres.in   | wrongpass  | 400            |
+
+
 @TestCase=11
-Scenario: TC11_Crear nuevo usuario
+@Offline
+Scenario Outline: TC11_Crear nuevo usuario
     Given path '/users'
-    And request testData.newUser
+    And request { "name": "<name>", "job": "<job>" }
     When method POST
-    Then status 201
+    Then status <expectedStatus>
     And match response contains { id: '#string', createdAt: '#string' }
-    And match response.name == testData.newUser.name
-    And match response.job == testData.newUser.job
+    And match response.name == '<name>'
+    And match response.job == '<job>'
     * print 'Created user with ID:', response.id
+
+Examples:
+    | name      | job       | expectedStatus |
+    | morpheus1  | leader   | 201            |
+    | morpheus2  | tl       | 201            |
+    | morpheus3  | po       | 201            |
+    | morpheus4  | pm       | 201            |
+    | morpheus5  | sh       | 201            |
+    | morpheus6  | an       | 201            |
