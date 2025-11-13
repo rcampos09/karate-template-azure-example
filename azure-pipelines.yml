@@ -61,20 +61,6 @@ steps:
     ls -R $(Build.SourcesDirectory)/target/
   displayName: 'List Target Directory Contents'
 
-- task: PublishTestResults@2
-  condition: always()
-  inputs:
-    testResultsFormat: 'JUnit'
-    testResultsFiles: '$(Build.SourcesDirectory)/target/surefire-reports/TEST-*.xml'
-    searchFolder: '$(Build.SourcesDirectory)'
-    mergeTestResults: true
-    failTaskOnFailedTests: false
-    testRunTitle: 'Karate Tests (Pipeline View Only)'
-    buildPlatform: 'Karate'
-    buildConfiguration: 'qa'
-    publishRunAttachments: true
-  displayName: 'Publish Test Results to Pipeline (for UI visibility only)'
-
 # Script para asociar resultados con Azure Test Plan (con iteraciones)
 - task: PowerShell@2
   condition: always()
