@@ -68,12 +68,12 @@ steps:
     testResultsFiles: '$(Build.SourcesDirectory)/target/surefire-reports/TEST-*.xml'
     searchFolder: '$(Build.SourcesDirectory)'
     mergeTestResults: true
-    failTaskOnFailedTests: false  # No fallar aquí, fallar después de publicar en Test Plans
-    testRunTitle: 'Karate Automated Tests - Build $(Build.BuildNumber)'
+    failTaskOnFailedTests: false
+    testRunTitle: 'Karate Tests (Pipeline View Only)'
     buildPlatform: 'Karate'
     buildConfiguration: 'qa'
     publishRunAttachments: true
-  displayName: 'Publish Test Results to Pipeline'
+  displayName: 'Publish Test Results to Pipeline (for UI visibility only)'
 
 # Script para asociar resultados con Azure Test Plan (con iteraciones)
 - task: PowerShell@2
@@ -217,9 +217,15 @@ steps:
           } | Select-Object -First 1
 
           if ($testPoint) {
+              # Obtener información del Test Case desde el Test Point
+              $testCaseRef = $testPoint.testCase
+
               # Crear resultado con información de iteración
               $resultData = @{
-                  testCase = @{ id = $iteration.testCaseId }
+                  testCase = @{
+                      id = $iteration.testCaseId
+                  }
+                  testCaseTitle = $iteration.testCaseTitle
                   testPoint = @{ id = $testPoint.id }
                   outcome = $iteration.outcome
                   state = "Completed"
