@@ -26,7 +26,7 @@ Examples:
     | janet.weaver@reqres.in    | cityslicka  | 200            | 2000    |
     | emma.wong@reqres.in       | cityslicka  | 200            | 2000    |
     | charles.morris@reqres.in  | cityslicka  | 200            | 2000    |
-    | tracey.ramos@reqres.in    | cityslicka  | 200            | 2000    |
+    | eve.holt@reqres.in        | cityslicka  | 400            | 2000    |
 
 
 @TestCase=10
@@ -47,7 +47,7 @@ Examples:
     | invalid3@reqres.in   | wrongpass  | 400            |
     | invalid4@reqres.in   | wrongpass  | 400            |
     | invalid5@reqres.in   | wrongpass  | 400            |
-    | invalid6@reqres.in   | wrongpass  | 400            |
+    | invalid7@reqres.in   | wrongpass  | 200            |
 
 
 @TestCase=11
@@ -70,4 +70,4 @@ Examples:
     | morpheus3  | po       | 201            |
     | morpheus4  | pm       | 201            |
     | morpheus5  | sh       | 201            |
-    | morpheus6  | an       | 201            |
+    | morpheus7  | qa       | 400            |
