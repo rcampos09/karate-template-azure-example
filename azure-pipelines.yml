@@ -147,6 +147,8 @@ steps:
           $steps = @()
           $lines = $content -split "`n"
 
+          Write-Host "    DEBUG: Extrayendo steps desde línea $lineNumber"
+
           for ($i = $lineNumber; $i -lt $lines.Count; $i++) {
               $line = $lines[$i].Trim()
 
@@ -154,11 +156,16 @@ steps:
                   $action = $line
                   $expected = if ($Matches[1] -eq "Then") { "Verificar resultado" } else { "Ejecutar paso" }
                   $steps += @{ action = $action; expected = $expected }
+                  Write-Host "    DEBUG: Step encontrado: $action"
               }
 
-              if ($line -match "^Examples:") { break }
+              if ($line -match "^Examples:") {
+                  Write-Host "    DEBUG: Fin de scenario (Examples encontrado)"
+                  break
+              }
           }
 
+          Write-Host "    DEBUG: Total steps extraídos: $($steps.Count)"
           return $steps
       }
 
