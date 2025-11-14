@@ -73,10 +73,10 @@ Examples:
     | morpheus7  | qa       | 400            |
 
 
-@TestCase=NEW
+@TestCase=19
 @Type=UpdateUser
 @Offline
-Scenario Outline: Actualizar job de usuario
+Scenario Outline: TC19_Actualizar job de usuario
     Given path '/users/2'
     And request { "name": "<name>", "job": "<job>" }
     When method PATCH

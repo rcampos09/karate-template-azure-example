@@ -165,14 +165,13 @@ steps:
           $content = Get-Content $featureFilePath -Raw
 
           if ($oldPattern -eq "NEW" -or $oldPattern -eq "AUTO") {
-              $pattern = "@TestCase=$oldPattern"
-              # Agregar prefijo TCX_ si no existe
+              # Paso 1: Reemplazar @TestCase=NEW por @TestCase=19 (simple)
+              $content = $content -replace "@TestCase=$oldPattern", "@TestCase=$newId"
+
+              # Paso 2: Agregar prefijo TCXX_ al scenario name si no lo tiene
               if ($scenarioName -notmatch "^TC\d+_") {
-                  $replacement = "@TestCase=$newId`n@Type=`$1`n@Offline`nScenario Outline: TC$newId`_$scenarioName"
-                  $content = $content -replace "(@TestCase=$oldPattern\s+@Type=(\w+)\s+@Offline\s+Scenario Outline:\s+$([regex]::Escape($scenarioName)))", $replacement
-              } else {
-                  $replacement = "@TestCase=$newId"
-                  $content = $content -replace $pattern, $replacement
+                  $escapedScenarioName = [regex]::Escape($scenarioName)
+                  $content = $content -replace "(Scenario Outline:\s+)$escapedScenarioName", "`${1}TC$newId`_$scenarioName"
               }
           }
 
