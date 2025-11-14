@@ -14,6 +14,11 @@ variables:
   TEST_SUITE_ID: 8
 
 steps:
+# Checkout con permisos para hacer push
+- checkout: self
+  persistCredentials: true
+  displayName: 'Checkout repository with write permissions'
+
 - task: JavaToolInstaller@0
   inputs:
     versionSpec: '17'
@@ -399,12 +404,45 @@ steps:
 
               git commit -m $commitMessage
 
-              # Push
-              Write-Host "`n  Pushing cambios al repositorio..."
-              git push origin HEAD:main
+              # Configurar remote con GitHub PAT para push
+              Write-Host "`n  Configurando credenciales de GitHub..."
+              $githubPat = $env:GITHUB_PAT
+              if ([string]::IsNullOrEmpty($githubPat)) {
+                  Write-Host "  ✗ ERROR: Variable GITHUB_PAT no configurada"
+                  Write-Host "  Por favor configura el GitHub Personal Access Token en Pipeline Variables"
+                  exit 1
+              }
 
-              Write-Host "`n✓ Cambios guardados y pusheados exitosamente"
-              Write-Host "  Test Cases creados: $($createdIds -join ', ')"
+              # Obtener la URL actual del repositorio
+              $currentRemote = git config --get remote.origin.url
+              Write-Host "  Remote actual: $currentRemote"
+
+              # Construir nueva URL con token (formato: https://PAT@github.com/user/repo.git)
+              if ($currentRemote -match "github\.com[:/](.+)/(.+)\.git") {
+                  $repoOwner = $Matches[1]
+                  $repoName = $Matches[2]
+                  $authenticatedUrl = "https://$githubPat@github.com/$repoOwner/$repoName.git"
+
+                  # Actualizar remote temporalmente
+                  git remote set-url origin $authenticatedUrl
+
+                  # Push
+                  Write-Host "`n  Pushing cambios al repositorio..."
+                  try {
+                      git push origin HEAD:main
+                      Write-Host "`n✓ Cambios guardados y pusheados exitosamente"
+                      Write-Host "  Test Cases creados: $($createdIds -join ', ')"
+                  } catch {
+                      Write-Host "`n✗ Error al hacer push: $($_.Exception.Message)"
+                      exit 1
+                  } finally {
+                      # Restaurar URL original (sin token) por seguridad
+                      git remote set-url origin $currentRemote
+                  }
+              } else {
+                  Write-Host "  ✗ ERROR: No se pudo parsear la URL del repositorio"
+                  exit 1
+              }
           }
       } else {
           Write-Host "`n✓ Todos los Test Cases ya existen en Test Plan"
@@ -906,6 +944,7 @@ steps:
   displayName: 'Associate Test Results with Azure Test Plan'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    GITHUB_PAT: $(GITHUB_PAT)
 
 - task: PublishBuildArtifacts@1
   condition: always()
