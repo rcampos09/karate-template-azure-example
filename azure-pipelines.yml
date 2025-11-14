@@ -114,40 +114,80 @@ steps:
       function Parse-ExamplesTable {
           param($content, $testCaseId)
 
-          # Buscar el bloque de Examples para este Test Case
-          $pattern = "@TestCase=$testCaseId[\s\S]*?Examples:\s*\|(.*?)\|([\s\S]*?)(?=@TestCase|\z)"
-          if ($content -match $pattern) {
-              $headerLine = $Matches[1].Trim()
-              $dataLines = $Matches[2].Trim()
+          $rows = @()
+          $lines = $content -split "`n"
+          $inExamples = $false
+          $inCorrectTestCase = $false
+          $columns = @()
 
-              # Extraer nombres de columnas
-              $columns = $headerLine -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+              $line = $lines[$i].Trim()
 
-              # Extraer filas de datos
-              $rows = @()
-              $dataLines -split "`n" | Where-Object { $_ -match '\|' } | ForEach-Object {
-                  $values = $_ -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
-                  if ($values.Count -gt 0) {
-                      $row = @{}
-                      for ($i = 0; $i -lt $columns.Count; $i++) {
-                          $row[$columns[$i]] = $values[$i]
+              # Verificar si estamos en el Test Case correcto
+              if ($line -match "@TestCase=$testCaseId") {
+                  $inCorrectTestCase = $true
+              }
+              # Si encontramos otro @TestCase, salir
+              elseif ($line -match "@TestCase=" -and $inCorrectTestCase) {
+                  break
+              }
+
+              # Si estamos en el Test Case correcto y encontramos Examples:
+              if ($inCorrectTestCase -and $line -match "^Examples:") {
+                  $inExamples = $true
+                  continue
+              }
+
+              # Si estamos en Examples, procesar las líneas con |
+              if ($inExamples -and $line -match '\|') {
+                  $parts = $line -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+                  if ($parts.Count -gt 0) {
+                      # Primera línea con | son los headers
+                      if ($columns.Count -eq 0) {
+                          $columns = $parts
+                          Write-Host "    Columnas encontradas: $($columns -join ', ')"
                       }
-                      $rows += $row
+                      # Las siguientes líneas son datos
+                      else {
+                          $row = @{}
+                          for ($j = 0; $j -lt [Math]::Min($columns.Count, $parts.Count); $j++) {
+                              $row[$columns[$j]] = $parts[$j]
+                          }
+                          $rows += $row
+                      }
                   }
               }
-              return $rows
           }
-          return @()
+
+          Write-Host "    Total filas extraídas: $($rows.Count)"
+          return $rows
       }
 
       # Extraer parámetros para cada Test Case
+      Write-Host "`n  Extrayendo TC9..."
       $testDataMap[9] = Parse-ExamplesTable -content $featureContent -testCaseId 9
+
+      Write-Host "`n  Extrayendo TC10..."
       $testDataMap[10] = Parse-ExamplesTable -content $featureContent -testCaseId 10
+
+      Write-Host "`n  Extrayendo TC11..."
       $testDataMap[11] = Parse-ExamplesTable -content $featureContent -testCaseId 11
 
+      Write-Host "`n  RESUMEN:"
       Write-Host "  TC9: $($testDataMap[9].Count) ejemplos extraídos"
       Write-Host "  TC10: $($testDataMap[10].Count) ejemplos extraídos"
       Write-Host "  TC11: $($testDataMap[11].Count) ejemplos extraídos"
+
+      # Debug: Mostrar primer ejemplo de TC9
+      if ($testDataMap[9].Count -gt 0) {
+          $firstRow = $testDataMap[9][0]
+          Write-Host "`n  DEBUG - Primer ejemplo TC9:"
+          Write-Host "    email: $($firstRow.email)"
+          Write-Host "    password: $($firstRow.password)"
+          Write-Host "    expectedStatus: $($firstRow.expectedStatus)"
+          Write-Host "    timeout: $($firstRow.timeout)"
+      }
 
       # Leer resultados de Karate (archivo XML de surefire)
       $xmlFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target/surefire-reports" -Filter "TEST-*.xml" -Recurse
@@ -206,6 +246,9 @@ steps:
 
                   if ($testDataMap.ContainsKey($testCaseId) -and $testDataMap[$testCaseId].Count -ge $iterationNumber) {
                       $testData = $testDataMap[$testCaseId][$iterationNumber - 1]
+
+                      # Debug: Verificar que testData tiene valores
+                      Write-Host "    DEBUG - TC$testCaseId Iteración $iterationNumber - testData keys: $($testData.Keys -join ', ')"
 
                       # Crear comentario detallado basado en el Test Case
                       $statusIcon = if ($outcome -eq "Passed") { "✓" } else { "✗" }
