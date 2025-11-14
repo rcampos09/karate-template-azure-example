@@ -39,6 +39,254 @@ steps:
   displayName: 'Cache Maven packages'
   continueOnError: true
 
+# PASO 1: Validar y crear Test Cases ANTES de ejecutar tests
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      # Configuración
+      $orgUrl = "https://dev.azure.com/$(AZURE_DEVOPS_ORG)"
+      $project = "$(AZURE_DEVOPS_PROJECT)"
+      $testPlanId = $(TEST_PLAN_ID)
+      $testSuiteId = $(TEST_SUITE_ID)
+      $pat = "$(System.AccessToken)"
+
+      # Convertir PAT a Base64
+      $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($pat)"))
+      $headers = @{
+          "Authorization" = "Basic $base64AuthInfo"
+          "Content-Type" = "application/json"
+      }
+
+      Write-Host "========================================"
+      Write-Host "PASO 1: Validación y Auto-Creación de Test Cases"
+      Write-Host "========================================"
+
+      # Leer el feature file
+      $featureFile = "$(Build.SourcesDirectory)/src/test/java/examples/users/TC12345_ValidarLogin.feature"
+      $featureContent = Get-Content $featureFile -Raw
+
+      # Función para verificar si un Test Case existe
+      function Test-TestCaseExists {
+          param($testCaseId)
+          $testCaseUrl = "$orgUrl/$project/_apis/wit/workitems/$testCaseId`?api-version=7.0"
+          try {
+              $testCase = Invoke-RestMethod -Uri $testCaseUrl -Method Get -Headers $headers -ErrorAction Stop
+              return $true
+          } catch {
+              return $false
+          }
+      }
+
+      # Función para crear Test Case
+      function Create-TestCase {
+          param($scenarioName, $type, $steps)
+
+          Write-Host "    Creando Test Case en Azure DevOps..."
+
+          $title = $scenarioName
+          $stepsHtml = "<steps id='0' last='$($steps.Count)'>"
+          $stepId = 1
+          foreach ($step in $steps) {
+              $stepsHtml += "<step id='$stepId' type='ValidateStep'>"
+              $stepsHtml += "<parameterizedString isformatted='true'>$($step.action)</parameterizedString>"
+              $stepsHtml += "<parameterizedString isformatted='true'>$($step.expected)</parameterizedString>"
+              $stepsHtml += "<description/></step>"
+              $stepId++
+          }
+          $stepsHtml += "</steps>"
+
+          $createBody = @(
+              @{ op = "add"; path = "/fields/System.Title"; value = $title },
+              @{ op = "add"; path = "/fields/System.AreaPath"; value = $project },
+              @{ op = "add"; path = "/fields/System.IterationPath"; value = $project },
+              @{ op = "add"; path = "/fields/Microsoft.VSTS.TCM.Steps"; value = $stepsHtml },
+              @{ op = "add"; path = "/fields/System.Tags"; value = if ($type) { "Automated; $type" } else { "Automated" } }
+          ) | ConvertTo-Json -Depth 10
+
+          $createUrl = "$orgUrl/$project/_apis/wit/workitems/`$Test Case?api-version=7.0"
+          $headersWithContentType = $headers.Clone()
+          $headersWithContentType["Content-Type"] = "application/json-patch+json"
+
+          try {
+              $newTestCase = Invoke-RestMethod -Uri $createUrl -Method Post -Headers $headersWithContentType -Body $createBody
+              Write-Host "    ✓ Test Case creado con ID: $($newTestCase.id)"
+              return $newTestCase.id
+          } catch {
+              Write-Host "    ✗ Error al crear Test Case: $($_.Exception.Message)"
+              return $null
+          }
+      }
+
+      # Función para agregar Test Case a Test Suite
+      function Add-TestCaseToSuite {
+          param($testCaseId, $suiteId)
+
+          Write-Host "    Agregando TC$testCaseId al Test Suite $suiteId..."
+
+          $addUrl = "$orgUrl/$project/_apis/testplan/Plans/$testPlanId/Suites/$suiteId/TestCase/$testCaseId`?api-version=7.1-preview.3"
+
+          try {
+              Invoke-RestMethod -Uri $addUrl -Method Post -Headers $headers -ContentType "application/json" | Out-Null
+              Write-Host "    ✓ Test Case agregado al Suite"
+              return $true
+          } catch {
+              Write-Host "    ⚠ Error al agregar al Suite: $($_.Exception.Message)"
+              return $false
+          }
+      }
+
+      # Función para extraer steps del Gherkin
+      function Get-StepsFromScenario {
+          param($content, $lineNumber)
+
+          $steps = @()
+          $lines = $content -split "`n"
+
+          for ($i = $lineNumber; $i -lt $lines.Count; $i++) {
+              $line = $lines[$i].Trim()
+
+              if ($line -match "^(Given|When|Then|And)\s+(.+)") {
+                  $action = $line
+                  $expected = if ($Matches[1] -eq "Then") { "Verificar resultado" } else { "Ejecutar paso" }
+                  $steps += @{ action = $action; expected = $expected }
+              }
+
+              if ($line -match "^Examples:") { break }
+          }
+
+          return $steps
+      }
+
+      # Función para actualizar feature file
+      function Update-FeatureFileWithId {
+          param($featureFilePath, $oldPattern, $newId, $scenarioName)
+
+          $content = Get-Content $featureFilePath -Raw
+
+          if ($oldPattern -eq "NEW" -or $oldPattern -eq "AUTO") {
+              $pattern = "@TestCase=$oldPattern"
+              # Agregar prefijo TCX_ si no existe
+              if ($scenarioName -notmatch "^TC\d+_") {
+                  $replacement = "@TestCase=$newId`n@Type=`$1`n@Offline`nScenario Outline: TC$newId`_$scenarioName"
+                  $content = $content -replace "(@TestCase=$oldPattern\s+@Type=(\w+)\s+@Offline\s+Scenario Outline:\s+$([regex]::Escape($scenarioName)))", $replacement
+              } else {
+                  $replacement = "@TestCase=$newId"
+                  $content = $content -replace $pattern, $replacement
+              }
+          }
+
+          Set-Content -Path $featureFilePath -Value $content -NoNewline
+          return $true
+      }
+
+      # Escanear feature file
+      Write-Host "`nValidando Test Cases en feature file..."
+      $lines = $featureContent -split "`n"
+      $scenariosToCreate = @()
+      $existingTestCases = @()
+      $createdTestCases = @()
+
+      for ($i = 0; $i -lt $lines.Count; $i++) {
+          $line = $lines[$i].Trim()
+
+          if ($line -match "@TestCase=(.+)") {
+              $testCaseId = $Matches[1].Trim()
+              $lineNumber = $i
+
+              # Buscar @Type
+              $type = $null
+              for ($j = [Math]::Max(0, $i-3); $j -lt [Math]::Min($lines.Count, $i+3); $j++) {
+                  if ($lines[$j] -match "@Type=(\w+)") {
+                      $type = $Matches[1]
+                      break
+                  }
+              }
+
+              # Buscar nombre del Scenario
+              $scenarioName = ""
+              for ($k = $i+1; $k -lt [Math]::Min($lines.Count, $i+5); $k++) {
+                  if ($lines[$k] -match "Scenario Outline:\s*(.+)") {
+                      $scenarioName = $Matches[1].Trim()
+                      break
+                  }
+              }
+
+              # Verificar si es ID numérico o marcador
+              if ($testCaseId -match '^\d+$') {
+                  Write-Host "`n  Validando TC$testCaseId..."
+                  $exists = Test-TestCaseExists -testCaseId $testCaseId
+                  if ($exists) {
+                      Write-Host "    ✓ Existe en Test Plan"
+                      $existingTestCases += [int]$testCaseId
+                  } else {
+                      Write-Host "    ✗ NO existe en Test Plan - ERROR"
+                      exit 1
+                  }
+              } elseif ($testCaseId -eq "NEW" -or $testCaseId -eq "AUTO") {
+                  Write-Host "`n  Detectado nuevo Test Case: $scenarioName"
+                  $steps = Get-StepsFromScenario -content $featureContent -lineNumber $lineNumber
+                  $scenariosToCreate += @{
+                      oldPattern = $testCaseId
+                      scenarioName = $scenarioName
+                      type = $type
+                      steps = $steps
+                  }
+              }
+          }
+      }
+
+      # Crear Test Cases nuevos
+      if ($scenariosToCreate.Count -gt 0) {
+          Write-Host "`n========================================"
+          Write-Host "Creando $($scenariosToCreate.Count) Test Case(s) nuevo(s)..."
+          Write-Host "========================================"
+
+          foreach ($scenario in $scenariosToCreate) {
+              Write-Host "`n  Scenario: $($scenario.scenarioName)"
+              Write-Host "  Type: $(if($scenario.type){$scenario.type}else{'Genérico'})"
+
+              # Crear Test Case
+              $newId = Create-TestCase -scenarioName $scenario.scenarioName `
+                                       -type $scenario.type `
+                                       -steps $scenario.steps
+
+              if ($newId) {
+                  # Agregar a Test Suite
+                  $added = Add-TestCaseToSuite -testCaseId $newId -suiteId $testSuiteId
+
+                  if ($added) {
+                      # Actualizar feature file
+                      $updated = Update-FeatureFileWithId -featureFilePath $featureFile `
+                                                          -oldPattern $scenario.oldPattern `
+                                                          -newId $newId `
+                                                          -scenarioName $scenario.scenarioName
+
+                      if ($updated) {
+                          Write-Host "    ✓ Feature file actualizado localmente"
+                          $createdTestCases += $newId
+                      }
+                  }
+              }
+          }
+
+          # Guardar IDs creados para el segundo step
+          $createdIdsJson = $createdTestCases | ConvertTo-Json
+          Set-Content -Path "$(Build.SourcesDirectory)/created_test_cases.json" -Value $createdIdsJson
+
+          Write-Host "`n✓ Test Cases creados: $($createdTestCases -join ', ')"
+      } else {
+          Write-Host "`n✓ Todos los Test Cases ya existen en Test Plan"
+          Set-Content -Path "$(Build.SourcesDirectory)/created_test_cases.json" -Value "[]"
+      }
+
+      Write-Host "`n========================================"
+      Write-Host "Continuando con ejecución de tests..."
+      Write-Host "========================================`n"
+  displayName: 'Validate and Auto-Create Test Cases'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
 - task: Maven@4
   inputs:
     mavenPomFile: 'pom.xml'
@@ -111,352 +359,6 @@ steps:
       Write-Host "`nExtrayendo parámetros del feature file..."
       $featureFile = "$(Build.SourcesDirectory)/src/test/java/examples/users/TC12345_ValidarLogin.feature"
       $featureContent = Get-Content $featureFile -Raw
-
-      # ========================================
-      # AUTO-CREACIÓN DE TEST CASES FALTANTES
-      # ========================================
-
-      # Función para verificar si un Test Case existe en Azure DevOps
-      function Test-TestCaseExists {
-          param($testCaseId)
-
-          $testCaseUrl = "$orgUrl/$project/_apis/wit/workitems/$testCaseId`?api-version=7.0"
-          try {
-              $testCase = Invoke-RestMethod -Uri $testCaseUrl -Method Get -Headers $headers -ErrorAction Stop
-              return $true
-          } catch {
-              return $false
-          }
-      }
-
-      # Función para crear Test Case en Azure DevOps
-      function Create-TestCase {
-          param($scenarioName, $type, $steps)
-
-          Write-Host "    Creando Test Case en Azure DevOps..."
-
-          # Preparar el título
-          $title = $scenarioName
-
-          # Construir HTML de steps desde Gherkin
-          $stepsHtml = "<steps id='0' last='$($steps.Count)'>"
-          $stepId = 1
-          foreach ($step in $steps) {
-              $stepsHtml += "<step id='$stepId' type='ValidateStep'>"
-              $stepsHtml += "<parameterizedString isformatted='true'>$($step.action)</parameterizedString>"
-              $stepsHtml += "<parameterizedString isformatted='true'>$($step.expected)</parameterizedString>"
-              $stepsHtml += "<description/></step>"
-              $stepId++
-          }
-          $stepsHtml += "</steps>"
-
-          # Crear el Work Item
-          $createBody = @(
-              @{
-                  op = "add"
-                  path = "/fields/System.Title"
-                  value = $title
-              },
-              @{
-                  op = "add"
-                  path = "/fields/System.AreaPath"
-                  value = $project
-              },
-              @{
-                  op = "add"
-                  path = "/fields/System.IterationPath"
-                  value = $project
-              },
-              @{
-                  op = "add"
-                  path = "/fields/Microsoft.VSTS.TCM.Steps"
-                  value = $stepsHtml
-              },
-              @{
-                  op = "add"
-                  path = "/fields/System.Tags"
-                  value = if ($type) { "Automated; $type" } else { "Automated" }
-              }
-          ) | ConvertTo-Json -Depth 10
-
-          $createUrl = "$orgUrl/$project/_apis/wit/workitems/`$Test Case?api-version=7.0"
-          $headersWithContentType = $headers.Clone()
-          $headersWithContentType["Content-Type"] = "application/json-patch+json"
-
-          try {
-              $newTestCase = Invoke-RestMethod -Uri $createUrl -Method Post -Headers $headersWithContentType -Body $createBody
-              Write-Host "    ✓ Test Case creado con ID: $($newTestCase.id)"
-              return $newTestCase.id
-          } catch {
-              Write-Host "    ✗ Error al crear Test Case: $($_.Exception.Message)"
-              if ($_.ErrorDetails.Message) {
-                  Write-Host "    Detalles: $($_.ErrorDetails.Message)"
-              }
-              return $null
-          }
-      }
-
-      # Función para agregar Test Case a Test Suite
-      function Add-TestCaseToSuite {
-          param($testCaseId, $suiteId)
-
-          Write-Host "    Agregando TC$testCaseId al Test Suite $suiteId..."
-
-          # Usar endpoint de suite entries que es más robusto
-          $addUrl = "$orgUrl/$project/_apis/testplan/Plans/$testPlanId/Suites/$suiteId/TestCase/$testCaseId`?api-version=7.1-preview.3"
-
-          try {
-              # Este endpoint usa POST sin body
-              Invoke-RestMethod -Uri $addUrl -Method Post -Headers $headers -ContentType "application/json" | Out-Null
-              Write-Host "    ✓ Test Case agregado al Suite"
-              return $true
-          } catch {
-              Write-Host "    ⚠ Error al agregar al Suite: $($_.Exception.Message)"
-              if ($_.ErrorDetails.Message) {
-                  Write-Host "    Detalles: $($_.ErrorDetails.Message)"
-              }
-              return $false
-          }
-      }
-
-      # Función para extraer steps del Gherkin
-      function Get-StepsFromScenario {
-          param($content, $lineNumber)
-
-          $steps = @()
-          $lines = $content -split "`n"
-          $inScenario = $false
-
-          for ($i = $lineNumber; $i -lt $lines.Count; $i++) {
-              $line = $lines[$i].Trim()
-
-              if ($line -match "^(Given|When|Then|And)\s+(.+)") {
-                  $action = $line
-                  $expected = if ($Matches[1] -eq "Then") { "Verificar resultado" } else { "Ejecutar paso" }
-                  $steps += @{
-                      action = $action
-                      expected = $expected
-                  }
-              }
-
-              # Salir si encontramos Examples:
-              if ($line -match "^Examples:") {
-                  break
-              }
-          }
-
-          return $steps
-      }
-
-      # Función para actualizar feature file con nuevo ID
-      function Update-FeatureFileWithId {
-          param($featureFilePath, $oldPattern, $newId, $scenarioName)
-
-          $content = Get-Content $featureFilePath -Raw
-
-          # Buscar y reemplazar
-          if ($oldPattern -eq "NEW" -or $oldPattern -eq "AUTO" -or $oldPattern -eq "") {
-              # Buscar el scenario sin ID o con marcador
-              if ($oldPattern) {
-                  $pattern = "@TestCase=$oldPattern"
-                  $replacement = "@TestCase=$newId"
-              } else {
-                  # No tiene @TestCase, agregarlo antes del @Type o @Offline
-                  $pattern = "(@Type=\w+|@Offline)\s*\nScenario Outline:\s*$([regex]::Escape($scenarioName))"
-                  $replacement = "@TestCase=$newId`n`$1`nScenario Outline: TC$newId`_$scenarioName"
-              }
-          } else {
-              return $false
-          }
-
-          $newContent = $content -replace $pattern, $replacement
-          Set-Content -Path $featureFilePath -Value $newContent -NoNewline
-
-          return $true
-      }
-
-      # Descubrir scenarios con y sin ID válido
-      Write-Host "`n========================================"
-      Write-Host "Validando Test Cases en feature file..."
-      Write-Host "========================================"
-
-      $lines = $featureContent -split "`n"
-      $scenariosToCreate = @()
-      $existingTestCases = @()
-
-      for ($i = 0; $i -lt $lines.Count; $i++) {
-          $line = $lines[$i].Trim()
-
-          if ($line -match "@TestCase=(.+)") {
-              $testCaseId = $Matches[1].Trim()
-              $lineNumber = $i
-
-              # Buscar @Type
-              $type = $null
-              for ($j = [Math]::Max(0, $i-3); $j -lt [Math]::Min($lines.Count, $i+3); $j++) {
-                  if ($lines[$j] -match "@Type=(\w+)") {
-                      $type = $Matches[1]
-                      break
-                  }
-              }
-
-              # Buscar nombre del Scenario
-              $scenarioName = ""
-              if ($i+1 -lt $lines.Count -and $lines[$i+1] -match "Scenario Outline:\s*(.+)") {
-                  $scenarioName = $Matches[1].Trim()
-              } elseif ($i+2 -lt $lines.Count -and $lines[$i+2] -match "Scenario Outline:\s*(.+)") {
-                  $scenarioName = $Matches[1].Trim()
-              } elseif ($i+3 -lt $lines.Count -and $lines[$i+3] -match "Scenario Outline:\s*(.+)") {
-                  $scenarioName = $Matches[1].Trim()
-              }
-
-              # Verificar si es un ID válido numérico o marcador especial
-              if ($testCaseId -match '^\d+$') {
-                  # Es un ID numérico, verificar si existe
-                  Write-Host "`n  Validando TC$testCaseId..."
-                  $exists = Test-TestCaseExists -testCaseId $testCaseId
-                  if ($exists) {
-                      Write-Host "    ✓ Existe en Test Plan"
-                      $existingTestCases += [int]$testCaseId
-                  } else {
-                      Write-Host "    ✗ NO existe en Test Plan - ERROR"
-                      Write-Host "    Debes crear TC$testCaseId manualmente o cambiar a @TestCase=NEW"
-                      exit 1
-                  }
-              } elseif ($testCaseId -eq "NEW" -or $testCaseId -eq "AUTO") {
-                  # Marcador para auto-creación
-                  Write-Host "`n  Detectado nuevo Test Case: $scenarioName"
-                  $steps = Get-StepsFromScenario -content $featureContent -lineNumber $lineNumber
-                  $scenariosToCreate += @{
-                      oldPattern = $testCaseId
-                      scenarioName = $scenarioName
-                      type = $type
-                      steps = $steps
-                  }
-              }
-          }
-      }
-
-      # Crear los Test Cases que faltan
-      $createdIds = @()
-      $fileUpdated = $false
-
-      if ($scenariosToCreate.Count -gt 0) {
-          Write-Host "`n========================================"
-          Write-Host "Creando $($scenariosToCreate.Count) Test Case(s) nuevo(s)..."
-          Write-Host "========================================"
-
-          foreach ($scenario in $scenariosToCreate) {
-              Write-Host "`n  Scenario: $($scenario.scenarioName)"
-              Write-Host "  Type: $(if($scenario.type){$scenario.type}else{'Genérico'})"
-
-              # Crear Test Case
-              $newId = Create-TestCase -scenarioName $scenario.scenarioName `
-                                       -type $scenario.type `
-                                       -steps $scenario.steps
-
-              if ($newId) {
-                  # Agregar a Test Suite
-                  $added = Add-TestCaseToSuite -testCaseId $newId -suiteId $testSuiteId
-
-                  if ($added) {
-                      # Actualizar feature file
-                      $updated = Update-FeatureFileWithId -featureFilePath $featureFile `
-                                                          -oldPattern $scenario.oldPattern `
-                                                          -newId $newId `
-                                                          -scenarioName $scenario.scenarioName
-
-                      if ($updated) {
-                          Write-Host "    ✓ Feature file actualizado"
-                          $createdIds += $newId
-                          $fileUpdated = $true
-                      }
-                  }
-              }
-          }
-
-          # Si hubo cambios, hacer commit y push
-          if ($fileUpdated -and $createdIds.Count -gt 0) {
-              Write-Host "`n========================================"
-              Write-Host "Guardando cambios en Git..."
-              Write-Host "========================================"
-
-              $repoPath = "$(Build.SourcesDirectory)"
-              Set-Location $repoPath
-
-              # Configurar Git
-              git config user.email "azurepipeline@automated.com"
-              git config user.name "Azure Pipeline Bot"
-
-              # Releer el archivo actualizado
-              $featureContent = Get-Content $featureFile -Raw
-
-              # Agregar cambios
-              git add $featureFile
-
-              # Crear commit
-              $commitMessage = "Auto: Agregar IDs de Test Cases [$($createdIds -join ', ')]`n`n" +
-                              "Test Cases creados automáticamente:`n"
-              foreach ($id in $createdIds) {
-                  $commitMessage += "- TC$id`n"
-              }
-              $commitMessage += "`n🤖 Generado automáticamente por Azure Pipeline"
-
-              git commit -m $commitMessage
-
-              # Configurar remote con GitHub PAT para push
-              Write-Host "`n  Configurando credenciales de GitHub..."
-              $githubPat = $env:GITHUB_PAT
-              if ([string]::IsNullOrEmpty($githubPat)) {
-                  Write-Host "  ✗ ERROR: Variable GITHUB_PAT no configurada"
-                  Write-Host "  Por favor configura el GitHub Personal Access Token en Pipeline Variables"
-                  exit 1
-              }
-
-              # Obtener la URL actual del repositorio
-              $currentRemote = git config --get remote.origin.url
-              Write-Host "  Remote actual: $currentRemote"
-
-              # Construir nueva URL con token (formato: https://PAT@github.com/user/repo.git)
-              # Soportar URLs con o sin .git al final
-              if ($currentRemote -match "github\.com[:/](.+)/(.+?)(\.git)?$") {
-                  $repoOwner = $Matches[1]
-                  $repoName = $Matches[2]
-
-                  # Asegurar que la URL autenticada termine en .git
-                  $authenticatedUrl = "https://$githubPat@github.com/$repoOwner/$repoName.git"
-
-                  Write-Host "  Repository: $repoOwner/$repoName"
-
-                  # Actualizar remote temporalmente
-                  git remote set-url origin $authenticatedUrl
-
-                  # Push
-                  Write-Host "`n  Pushing cambios al repositorio..."
-                  try {
-                      git push origin HEAD:main
-                      Write-Host "`n✓ Cambios guardados y pusheados exitosamente"
-                      Write-Host "  Test Cases creados: $($createdIds -join ', ')"
-                  } catch {
-                      Write-Host "`n✗ Error al hacer push: $($_.Exception.Message)"
-                      exit 1
-                  } finally {
-                      # Restaurar URL original (sin token) por seguridad
-                      git remote set-url origin $currentRemote
-                  }
-              } else {
-                  Write-Host "  ✗ ERROR: No se pudo parsear la URL del repositorio"
-                  Write-Host "  URL recibida: $currentRemote"
-                  exit 1
-              }
-          }
-      } else {
-          Write-Host "`n✓ Todos los Test Cases ya existen en Test Plan"
-      }
-
-      Write-Host "`n========================================"
-      Write-Host "Continuando con ejecución normal..."
-      Write-Host "========================================`n"
 
       # Parsear los parámetros de cada Test Case del feature file
       $testDataMap = @{}
@@ -934,6 +836,81 @@ steps:
               Write-Host "✓ Test Run $testRunId completado"
           } catch {
               Write-Host "⚠ Error al completar Test Run: $($_.Exception.Message)"
+          }
+
+          # ========================================
+          # PASO 2: Git Push (si hubo Test Cases creados)
+          # ========================================
+          $createdIdsFile = "$(Build.SourcesDirectory)/created_test_cases.json"
+          if (Test-Path $createdIdsFile) {
+              $createdIdsJson = Get-Content $createdIdsFile -Raw
+              $createdTestCases = $createdIdsJson | ConvertFrom-Json
+
+              if ($createdTestCases -and $createdTestCases.Count -gt 0) {
+                  Write-Host "`n========================================"
+                  Write-Host "Guardando cambios en Git..."
+                  Write-Host "========================================"
+
+                  $repoPath = "$(Build.SourcesDirectory)"
+                  Set-Location $repoPath
+
+                  # Configurar Git
+                  git config user.email "azurepipeline@automated.com"
+                  git config user.name "Azure Pipeline Bot"
+
+                  # Agregar cambios
+                  git add $featureFile
+
+                  # Crear commit
+                  $commitMessage = "Auto: Agregar IDs de Test Cases [$($createdTestCases -join ', ')]`n`n" +
+                                  "Test Cases creados automáticamente:`n"
+                  foreach ($id in $createdTestCases) {
+                      $commitMessage += "- TC$id`n"
+                  }
+                  $commitMessage += "`n🤖 Generado automáticamente por Azure Pipeline"
+
+                  git commit -m $commitMessage
+
+                  # Configurar remote con GitHub PAT para push
+                  Write-Host "`n  Configurando credenciales de GitHub..."
+                  $githubPat = $env:GITHUB_PAT
+                  if ([string]::IsNullOrEmpty($githubPat)) {
+                      Write-Host "  ✗ ERROR: Variable GITHUB_PAT no configurada"
+                      Write-Host "  Por favor configura el GitHub Personal Access Token en Pipeline Variables"
+                  } else {
+                      # Obtener la URL actual del repositorio
+                      $currentRemote = git config --get remote.origin.url
+                      Write-Host "  Remote actual: $currentRemote"
+
+                      # Construir nueva URL con token
+                      if ($currentRemote -match "github\.com[:/](.+)/(.+?)(\.git)?$") {
+                          $repoOwner = $Matches[1]
+                          $repoName = $Matches[2]
+                          $authenticatedUrl = "https://$githubPat@github.com/$repoOwner/$repoName.git"
+
+                          Write-Host "  Repository: $repoOwner/$repoName"
+
+                          # Actualizar remote temporalmente
+                          git remote set-url origin $authenticatedUrl
+
+                          # Push
+                          Write-Host "`n  Pushing cambios al repositorio..."
+                          try {
+                              git push origin HEAD:main
+                              Write-Host "`n✓ Cambios guardados y pusheados exitosamente"
+                              Write-Host "  Test Cases creados: $($createdTestCases -join ', ')"
+                          } catch {
+                              Write-Host "`n✗ Error al hacer push: $($_.Exception.Message)"
+                          } finally {
+                              # Restaurar URL original (sin token) por seguridad
+                              git remote set-url origin $currentRemote
+                          }
+                      } else {
+                          Write-Host "  ✗ ERROR: No se pudo parsear la URL del repositorio"
+                          Write-Host "  URL recibida: $currentRemote"
+                      }
+                  }
+              }
           }
 
           Write-Host "`n========================================"
