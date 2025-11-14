@@ -94,7 +94,7 @@ Examples:
     | morpheus7  | qa resident          | 400            |
 
 
-@TestCase=NEW
+@TestCase=25
 @Type=UpdateUser
 @Offline
 Scenario Outline: TC24_Actualizar job de usuario
