@@ -73,7 +73,7 @@ Examples:
     | morpheus7  | qa       | 400            |
 
 
-@TestCase=17
+@TestCase=NEW
 @Type=UpdateUser
 @Offline
 Scenario Outline: Actualizar job de usuario
