@@ -102,6 +102,53 @@ steps:
       $testRunId = $testRun.id
       Write-Host "✓ Test Run creado con ID: $testRunId"
 
+      # Leer el feature file para obtener los parámetros de Examples
+      Write-Host "`nExtrayendo parámetros del feature file..."
+      $featureFile = "$(Build.SourcesDirectory)/src/test/java/examples/users/TC12345_ValidarLogin.feature"
+      $featureContent = Get-Content $featureFile -Raw
+
+      # Parsear los parámetros de cada Test Case del feature file
+      $testDataMap = @{}
+
+      # Función para extraer datos de Examples de un Scenario Outline
+      function Parse-ExamplesTable {
+          param($content, $testCaseId)
+
+          # Buscar el bloque de Examples para este Test Case
+          $pattern = "@TestCase=$testCaseId[\s\S]*?Examples:\s*\|(.*?)\|([\s\S]*?)(?=@TestCase|\z)"
+          if ($content -match $pattern) {
+              $headerLine = $Matches[1].Trim()
+              $dataLines = $Matches[2].Trim()
+
+              # Extraer nombres de columnas
+              $columns = $headerLine -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+              # Extraer filas de datos
+              $rows = @()
+              $dataLines -split "`n" | Where-Object { $_ -match '\|' } | ForEach-Object {
+                  $values = $_ -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+                  if ($values.Count -gt 0) {
+                      $row = @{}
+                      for ($i = 0; $i -lt $columns.Count; $i++) {
+                          $row[$columns[$i]] = $values[$i]
+                      }
+                      $rows += $row
+                  }
+              }
+              return $rows
+          }
+          return @()
+      }
+
+      # Extraer parámetros para cada Test Case
+      $testDataMap[9] = Parse-ExamplesTable -content $featureContent -testCaseId 9
+      $testDataMap[10] = Parse-ExamplesTable -content $featureContent -testCaseId 10
+      $testDataMap[11] = Parse-ExamplesTable -content $featureContent -testCaseId 11
+
+      Write-Host "  TC9: $($testDataMap[9].Count) ejemplos extraídos"
+      Write-Host "  TC10: $($testDataMap[10].Count) ejemplos extraídos"
+      Write-Host "  TC11: $($testDataMap[11].Count) ejemplos extraídos"
+
       # Leer resultados de Karate (archivo XML de surefire)
       $xmlFiles = Get-ChildItem -Path "$(Build.SourcesDirectory)/target/surefire-reports" -Filter "TEST-*.xml" -Recurse
 
@@ -130,14 +177,6 @@ steps:
                   $iterationCounter[$testCaseId]++
                   $iterationNumber = $iterationCounter[$testCaseId]
 
-                  # Extraer parámetros de la iteración del nombre del test
-                  # Formato esperado: [1.X:YY] donde X es el número de iteración
-                  $iterationParams = ""
-                  if ($testName -match '\[1\.(\d+):') {
-                      $exampleRow = $Matches[1]
-                      $iterationParams = "Example Row $exampleRow"
-                  }
-
                   $outcome = "Passed"
                   $errorMessage = ""
                   $stackTrace = ""
@@ -160,6 +199,54 @@ steps:
                       $duration = [int]([double]$timeValue * 1000)
                   }
 
+                  # Obtener parámetros de la tabla Examples
+                  $testData = $null
+                  $iterationParams = ""
+                  $detailedComment = ""
+
+                  if ($testDataMap.ContainsKey($testCaseId) -and $testDataMap[$testCaseId].Count -ge $iterationNumber) {
+                      $testData = $testDataMap[$testCaseId][$iterationNumber - 1]
+
+                      # Crear comentario detallado basado en el Test Case
+                      $statusIcon = if ($outcome -eq "Passed") { "✓" } else { "✗" }
+
+                      if ($testCaseId -eq 9) {
+                          # TC9: Login exitoso
+                          $iterationParams = "Email: $($testData.email)"
+                          $detailedComment = @"
+$statusIcon TC9 - Iteración $iterationNumber/6: Login exitoso
+  • Email: $($testData.email)
+  • Password: $($testData.password)
+  • Status esperado: $($testData.expectedStatus)
+  • Timeout: $($testData.timeout)ms
+  • Duración real: $($duration)ms
+"@
+                      } elseif ($testCaseId -eq 10) {
+                          # TC10: Login fallido
+                          $iterationParams = "Email: $($testData.email)"
+                          $detailedComment = @"
+$statusIcon TC10 - Iteración $iterationNumber/6: Login fallido esperado
+  • Email: $($testData.email)
+  • Password: $($testData.password)
+  • Status esperado: $($testData.expectedStatus)
+  • Duración: $($duration)ms
+"@
+                      } elseif ($testCaseId -eq 11) {
+                          # TC11: Crear usuario
+                          $iterationParams = "Name: $($testData.name), Job: $($testData.job)"
+                          $detailedComment = @"
+$statusIcon TC11 - Iteración $iterationNumber/6: Usuario creado
+  • Name: $($testData.name)
+  • Job: $($testData.job)
+  • Status esperado: $($testData.expectedStatus)
+  • Duración: $($duration)ms
+"@
+                      }
+                  } else {
+                      $iterationParams = "Iteration $iterationNumber"
+                      $detailedComment = "Iteration $iterationNumber - $outcome"
+                  }
+
                   Write-Host "  [$iterationNumber] Test Case $testCaseId - $outcome ($duration ms) - $iterationParams"
 
                   # Agregar cada iteración como un resultado separado
@@ -168,6 +255,7 @@ steps:
                       testCaseTitle = $testCaseTitle
                       iterationNumber = $iterationNumber
                       iterationParams = $iterationParams
+                      detailedComment = $detailedComment
                       outcome = $outcome
                       errorMessage = $errorMessage
                       stackTrace = $stackTrace
@@ -230,7 +318,7 @@ steps:
                   state = "Completed"
                   durationInMs = $iteration.duration
                   automatedTestName = $iteration.automatedTestName
-                  comment = "Iteration $($iteration.iterationNumber) - $($iteration.iterationParams)"
+                  comment = $iteration.detailedComment  # Comentario detallado con parámetros del test
                   # Campos adicionales para mostrar en Test Results
                   priority = if ($testPoint.priority) { $testPoint.priority } else { 2 }  # Priority por defecto: 2
                   owner = if ($testPoint.assignedTo) { $testPoint.assignedTo } else { $null }
