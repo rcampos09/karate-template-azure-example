@@ -92,3 +92,24 @@ Examples:
     | morpheus4  | pm resident          | 200            |
     | morpheus5  | sh resident          | 200            |
     | morpheus7  | qa resident          | 400            |
+
+
+@TestCase=NEW
+@Type=UpdateUser
+@Offline
+Scenario Outline: TC24_Actualizar job de usuario
+    Given path '/users/2'
+    And request { "name": "<name>", "job": "<job>" }
+    When method PATCH
+    Then status <expectedStatus>
+    And match response contains { name: '<name>' }
+    And match response contains { job: '<job>' }
+
+Examples:
+    | name      | job                   | expectedStatus |
+    | morpheus1  | leader resident      | 200            |
+    | morpheus2  | tl resident          | 200            |
+    | morpheus3  | po resident          | 200            |
+    | morpheus4  | pm resident          | 200            |
+    | morpheus5  | sh resident          | 200            |
+    | morpheus7  | qa resident          | 400            |    
