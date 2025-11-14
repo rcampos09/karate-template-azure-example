@@ -78,6 +78,17 @@ steps:
           }
       }
 
+      # Función helper para escapar caracteres XML
+      function Escape-XmlString {
+          param($text)
+          if ([string]::IsNullOrEmpty($text)) { return "" }
+          return $text -replace '&', '&amp;' `
+                      -replace '<', '&lt;' `
+                      -replace '>', '&gt;' `
+                      -replace '"', '&quot;' `
+                      -replace "'", '&apos;'
+      }
+
       # Función para crear Test Case
       function Create-TestCase {
           param($scenarioName, $type, $steps)
@@ -87,14 +98,20 @@ steps:
           $title = $scenarioName
           $stepsHtml = "<steps id='0' last='$($steps.Count)'>"
           $stepId = 1
+
           foreach ($step in $steps) {
+              $action = Escape-XmlString -text $step.action
+              $expected = Escape-XmlString -text $step.expected
+
               $stepsHtml += "<step id='$stepId' type='ValidateStep'>"
-              $stepsHtml += "<parameterizedString isformatted='true'>$($step.action)</parameterizedString>"
-              $stepsHtml += "<parameterizedString isformatted='true'>$($step.expected)</parameterizedString>"
+              $stepsHtml += "<parameterizedString isformatted='true'>$action</parameterizedString>"
+              $stepsHtml += "<parameterizedString isformatted='true'>$expected</parameterizedString>"
               $stepsHtml += "<description/></step>"
               $stepId++
           }
           $stepsHtml += "</steps>"
+
+          Write-Host "    DEBUG: Steps HTML generado (primeros 200 chars): $($stepsHtml.Substring(0, [Math]::Min(200, $stepsHtml.Length)))"
 
           $createBody = @(
               @{ op = "add"; path = "/fields/System.Title"; value = $title },
@@ -871,8 +888,8 @@ steps:
                   # Agregar cambios
                   git add $featureFile
 
-                  # Crear commit
-                  $commitMessage = "Auto: Agregar IDs de Test Cases [$($createdTestCases -join ', ')]`n`n" +
+                  # Crear commit con [skip ci] para evitar disparar otro pipeline
+                  $commitMessage = "[skip ci] Auto: Agregar IDs de Test Cases [$($createdTestCases -join ', ')]`n`n" +
                                   "Test Cases creados automáticamente:`n"
                   foreach ($id in $createdTestCases) {
                       $commitMessage += "- TC$id`n"
