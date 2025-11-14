@@ -418,10 +418,15 @@ steps:
               Write-Host "  Remote actual: $currentRemote"
 
               # Construir nueva URL con token (formato: https://PAT@github.com/user/repo.git)
-              if ($currentRemote -match "github\.com[:/](.+)/(.+)\.git") {
+              # Soportar URLs con o sin .git al final
+              if ($currentRemote -match "github\.com[:/](.+)/(.+?)(\.git)?$") {
                   $repoOwner = $Matches[1]
                   $repoName = $Matches[2]
+
+                  # Asegurar que la URL autenticada termine en .git
                   $authenticatedUrl = "https://$githubPat@github.com/$repoOwner/$repoName.git"
+
+                  Write-Host "  Repository: $repoOwner/$repoName"
 
                   # Actualizar remote temporalmente
                   git remote set-url origin $authenticatedUrl
@@ -441,6 +446,7 @@ steps:
                   }
               } else {
                   Write-Host "  ✗ ERROR: No se pudo parsear la URL del repositorio"
+                  Write-Host "  URL recibida: $currentRemote"
                   exit 1
               }
           }
