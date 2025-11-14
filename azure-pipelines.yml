@@ -124,14 +124,18 @@ steps:
 
           Write-Host "    Agregando TC$testCaseId al Test Suite $suiteId..."
 
-          $addUrl = "$orgUrl/$project/_apis/testplan/Plans/$testPlanId/Suites/$suiteId/TestCase/$testCaseId`?api-version=7.1-preview.3"
+          # Usar endpoint estable con body JSON
+          $addUrl = "$orgUrl/$project/_apis/test/Plans/$testPlanId/Suites/$suiteId/testcases/$testCaseId`?api-version=7.0"
 
           try {
-              Invoke-RestMethod -Uri $addUrl -Method Post -Headers $headers -ContentType "application/json" | Out-Null
-              Write-Host "    ✓ Test Case agregado al Suite"
+              $result = Invoke-RestMethod -Uri $addUrl -Method Post -Headers $headers -ContentType "application/json"
+              Write-Host "    ✓ Test Case agregado al Suite (ID: $($result.id))"
               return $true
           } catch {
               Write-Host "    ⚠ Error al agregar al Suite: $($_.Exception.Message)"
+              if ($_.ErrorDetails.Message) {
+                  Write-Host "    Detalles: $($_.ErrorDetails.Message)"
+              }
               return $false
           }
       }
