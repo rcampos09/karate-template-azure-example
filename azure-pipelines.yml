@@ -213,34 +213,28 @@ steps:
                       if ($testCaseId -eq 9) {
                           # TC9: Login exitoso
                           $iterationParams = "Email: $($testData.email)"
-                          $detailedComment = @"
-$statusIcon TC9 - Iteración $iterationNumber/6: Login exitoso
-  • Email: $($testData.email)
-  • Password: $($testData.password)
-  • Status esperado: $($testData.expectedStatus)
-  • Timeout: $($testData.timeout)ms
-  • Duración real: $($duration)ms
-"@
+                          $detailedComment = "$statusIcon TC9 - Iteración $iterationNumber/6: Login exitoso`n" +
+                                            "  • Email: $($testData.email)`n" +
+                                            "  • Password: $($testData.password)`n" +
+                                            "  • Status esperado: $($testData.expectedStatus)`n" +
+                                            "  • Timeout: $($testData.timeout)ms`n" +
+                                            "  • Duración real: $($duration)ms"
                       } elseif ($testCaseId -eq 10) {
                           # TC10: Login fallido
                           $iterationParams = "Email: $($testData.email)"
-                          $detailedComment = @"
-$statusIcon TC10 - Iteración $iterationNumber/6: Login fallido esperado
-  • Email: $($testData.email)
-  • Password: $($testData.password)
-  • Status esperado: $($testData.expectedStatus)
-  • Duración: $($duration)ms
-"@
+                          $detailedComment = "$statusIcon TC10 - Iteración $iterationNumber/6: Login fallido esperado`n" +
+                                            "  • Email: $($testData.email)`n" +
+                                            "  • Password: $($testData.password)`n" +
+                                            "  • Status esperado: $($testData.expectedStatus)`n" +
+                                            "  • Duración: $($duration)ms"
                       } elseif ($testCaseId -eq 11) {
                           # TC11: Crear usuario
                           $iterationParams = "Name: $($testData.name), Job: $($testData.job)"
-                          $detailedComment = @"
-$statusIcon TC11 - Iteración $iterationNumber/6: Usuario creado
-  • Name: $($testData.name)
-  • Job: $($testData.job)
-  • Status esperado: $($testData.expectedStatus)
-  • Duración: $($duration)ms
-"@
+                          $detailedComment = "$statusIcon TC11 - Iteración $iterationNumber/6: Usuario creado`n" +
+                                            "  • Name: $($testData.name)`n" +
+                                            "  • Job: $($testData.job)`n" +
+                                            "  • Status esperado: $($testData.expectedStatus)`n" +
+                                            "  • Duración: $($duration)ms"
                       }
                   } else {
                       $iterationParams = "Iteration $iterationNumber"
