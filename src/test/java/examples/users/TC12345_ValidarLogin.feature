@@ -8,6 +8,7 @@ Background:
     * configure logPrettyResponse = true
 
 @TestCase=9
+@Type=LoginSuccess
 @Offline
 Scenario Outline: TC9_Login exitoso con credenciales válidas
     Given path '/login'
@@ -29,6 +30,7 @@ Examples:
 
 
 @TestCase=10
+@Type=LoginFailed
 @Offline
 Scenario Outline: TC10_Login fallido con credenciales inválidas
     Given path '/login'
@@ -49,6 +51,7 @@ Examples:
 
 
 @TestCase=11
+@Type=CreateUser
 @Offline
 Scenario Outline: TC11_Crear nuevo usuario
     Given path '/users'

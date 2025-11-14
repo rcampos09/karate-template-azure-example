@@ -109,6 +109,45 @@ steps:
 
       # Parsear los parámetros de cada Test Case del feature file
       $testDataMap = @{}
+      $testMetadataMap = @{}  # Para almacenar @Type y otros metadatos
+
+      # Función para descubrir todos los Test Cases en el feature file
+      function Get-AllTestCases {
+          param($content)
+
+          $testCases = @()
+          $lines = $content -split "`n"
+
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+              $line = $lines[$i].Trim()
+              if ($line -match "@TestCase=(\d+)") {
+                  $tcId = [int]$Matches[1]
+
+                  # Buscar @Type (opcional) en líneas cercanas
+                  $type = $null
+                  for ($j = [Math]::Max(0, $i-5); $j -lt [Math]::Min($lines.Count, $i+5); $j++) {
+                      if ($lines[$j] -match "@Type=(\w+)") {
+                          $type = $Matches[1]
+                          break
+                      }
+                  }
+
+                  # Buscar nombre del Scenario
+                  $scenarioName = ""
+                  if ($i+1 -lt $lines.Count -and $lines[$i+1] -match "Scenario Outline:\s*(.+)") {
+                      $scenarioName = $Matches[1].Trim()
+                  }
+
+                  $testCases += @{
+                      id = $tcId
+                      type = $type
+                      scenarioName = $scenarioName
+                  }
+              }
+          }
+
+          return $testCases
+      }
 
       # Función para extraer datos de Examples de un Scenario Outline
       function Parse-ExamplesTable {
@@ -146,7 +185,6 @@ steps:
                       # Primera línea con | son los headers
                       if ($columns.Count -eq 0) {
                           $columns = $parts
-                          Write-Host "    Columnas encontradas: $($columns -join ', ')"
                       }
                       # Las siguientes líneas son datos
                       else {
@@ -160,33 +198,85 @@ steps:
               }
           }
 
-          Write-Host "    Total filas extraídas: $($rows.Count)"
-          return $rows
+          return @{
+              rows = $rows
+              columns = $columns
+          }
       }
 
-      # Extraer parámetros para cada Test Case
-      Write-Host "`n  Extrayendo TC9..."
-      $testDataMap[9] = Parse-ExamplesTable -content $featureContent -testCaseId 9
+      # Descubrir automáticamente todos los Test Cases
+      Write-Host "`n  Descubriendo Test Cases en el feature file..."
+      $allTestCases = Get-AllTestCases -content $featureContent
+      Write-Host "  ✓ Test Cases encontrados: $($allTestCases.Count)"
 
-      Write-Host "`n  Extrayendo TC10..."
-      $testDataMap[10] = Parse-ExamplesTable -content $featureContent -testCaseId 10
+      # Extraer parámetros para cada Test Case descubierto
+      foreach ($tc in $allTestCases) {
+          Write-Host "`n  Extrayendo TC$($tc.id)..."
+          if ($tc.type) {
+              Write-Host "    @Type: $($tc.type)"
+          }
+          Write-Host "    Scenario: $($tc.scenarioName)"
 
-      Write-Host "`n  Extrayendo TC11..."
-      $testDataMap[11] = Parse-ExamplesTable -content $featureContent -testCaseId 11
+          $result = Parse-ExamplesTable -content $featureContent -testCaseId $tc.id
+          $testDataMap[$tc.id] = $result.rows
+          $testMetadataMap[$tc.id] = @{
+              type = $tc.type
+              scenarioName = $tc.scenarioName
+              columns = $result.columns
+          }
+
+          Write-Host "    Columnas: $($result.columns -join ', ')"
+          Write-Host "    Filas: $($result.rows.Count)"
+      }
 
       Write-Host "`n  RESUMEN:"
-      Write-Host "  TC9: $($testDataMap[9].Count) ejemplos extraídos"
-      Write-Host "  TC10: $($testDataMap[10].Count) ejemplos extraídos"
-      Write-Host "  TC11: $($testDataMap[11].Count) ejemplos extraídos"
+      foreach ($tc in $allTestCases) {
+          Write-Host "  TC$($tc.id): $($testDataMap[$tc.id].Count) ejemplos | Tipo: $(if($tc.type){$tc.type}else{'Genérico'})"
+      }
 
-      # Debug: Mostrar primer ejemplo de TC9
-      if ($testDataMap[9].Count -gt 0) {
-          $firstRow = $testDataMap[9][0]
-          Write-Host "`n  DEBUG - Primer ejemplo TC9:"
-          Write-Host "    email: $($firstRow.email)"
-          Write-Host "    password: $($firstRow.password)"
-          Write-Host "    expectedStatus: $($firstRow.expectedStatus)"
-          Write-Host "    timeout: $($firstRow.timeout)"
+      # Función para generar comentarios dinámicos
+      function Create-TestComment {
+          param($testCaseId, $iterationNumber, $totalIterations, $testData, $outcome, $duration, $metadata)
+
+          $statusIcon = if ($outcome -eq "Passed") { "✓" } else { "✗" }
+          $type = $metadata.type
+          $scenarioName = $metadata.scenarioName
+
+          # Determinar título del test basado en @Type o nombre del scenario
+          $testTitle = if ($type) {
+              switch ($type) {
+                  "LoginSuccess" { "Login exitoso" }
+                  "LoginFailed" { "Login fallido esperado" }
+                  "CreateUser" { "Usuario creado" }
+                  "UpdateUser" { "Usuario actualizado" }
+                  "DeleteUser" { "Usuario eliminado" }
+                  default { $scenarioName }
+              }
+          } else {
+              # Usar nombre del scenario sin el prefijo TCX_
+              $scenarioName -replace "^TC\d+_", ""
+          }
+
+          # Crear comentario base
+          $comment = "$statusIcon TC$testCaseId - Iteración $iterationNumber/$totalIterations`: $testTitle`n"
+
+          # Agregar parámetros dinámicamente
+          if ($testData) {
+              $comment += "Parámetros:`n"
+              foreach ($key in $testData.Keys | Sort-Object) {
+                  $value = $testData[$key]
+                  # Ocultar passwords parcialmente
+                  if ($key -eq "password") {
+                      $value = "********"
+                  }
+                  $comment += "  • $key`: $value`n"
+              }
+          }
+
+          # Agregar duración
+          $comment += "Duración: $($duration)ms"
+
+          return $comment
       }
 
       # Leer resultados de Karate (archivo XML de surefire)
@@ -239,45 +329,31 @@ steps:
                       $duration = [int]([double]$timeValue * 1000)
                   }
 
-                  # Obtener parámetros de la tabla Examples
+                  # Obtener parámetros de la tabla Examples y generar comentario dinámico
                   $testData = $null
                   $iterationParams = ""
                   $detailedComment = ""
 
                   if ($testDataMap.ContainsKey($testCaseId) -and $testDataMap[$testCaseId].Count -ge $iterationNumber) {
                       $testData = $testDataMap[$testCaseId][$iterationNumber - 1]
+                      $totalIterations = $testDataMap[$testCaseId].Count
+                      $metadata = $testMetadataMap[$testCaseId]
 
-                      # Debug: Verificar que testData tiene valores
-                      Write-Host "    DEBUG - TC$testCaseId Iteración $iterationNumber - testData keys: $($testData.Keys -join ', ')"
+                      # Generar comentario usando la función dinámica
+                      $detailedComment = Create-TestComment -testCaseId $testCaseId `
+                                                           -iterationNumber $iterationNumber `
+                                                           -totalIterations $totalIterations `
+                                                           -testData $testData `
+                                                           -outcome $outcome `
+                                                           -duration $duration `
+                                                           -metadata $metadata
 
-                      # Crear comentario detallado basado en el Test Case
-                      $statusIcon = if ($outcome -eq "Passed") { "✓" } else { "✗" }
-
-                      if ($testCaseId -eq 9) {
-                          # TC9: Login exitoso
-                          $iterationParams = "Email: $($testData.email)"
-                          $detailedComment = "$statusIcon TC9 - Iteración $iterationNumber/6: Login exitoso`n" +
-                                            "  • Email: $($testData.email)`n" +
-                                            "  • Password: $($testData.password)`n" +
-                                            "  • Status esperado: $($testData.expectedStatus)`n" +
-                                            "  • Timeout: $($testData.timeout)ms`n" +
-                                            "  • Duración real: $($duration)ms"
-                      } elseif ($testCaseId -eq 10) {
-                          # TC10: Login fallido
-                          $iterationParams = "Email: $($testData.email)"
-                          $detailedComment = "$statusIcon TC10 - Iteración $iterationNumber/6: Login fallido esperado`n" +
-                                            "  • Email: $($testData.email)`n" +
-                                            "  • Password: $($testData.password)`n" +
-                                            "  • Status esperado: $($testData.expectedStatus)`n" +
-                                            "  • Duración: $($duration)ms"
-                      } elseif ($testCaseId -eq 11) {
-                          # TC11: Crear usuario
-                          $iterationParams = "Name: $($testData.name), Job: $($testData.job)"
-                          $detailedComment = "$statusIcon TC11 - Iteración $iterationNumber/6: Usuario creado`n" +
-                                            "  • Name: $($testData.name)`n" +
-                                            "  • Job: $($testData.job)`n" +
-                                            "  • Status esperado: $($testData.expectedStatus)`n" +
-                                            "  • Duración: $($duration)ms"
+                      # Crear descripción corta para iterationParams (usar primer parámetro relevante)
+                      $firstKey = ($testData.Keys | Where-Object { $_ -ne 'expectedStatus' -and $_ -ne 'timeout' } | Select-Object -First 1)
+                      if ($firstKey) {
+                          $iterationParams = "$firstKey`: $($testData[$firstKey])"
+                      } else {
+                          $iterationParams = "Iteration $iterationNumber"
                       }
                   } else {
                       $iterationParams = "Iteration $iterationNumber"
